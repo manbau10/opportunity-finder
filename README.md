@@ -6,7 +6,18 @@ Ridwan A. Taiwo's CV.
 
 ---
 
-## Daily use
+## Two ways to use it
+
+**Online, from any device** — see [DEPLOY.md](DEPLOY.md). One link that works on
+your phone, someone else's phone, or any PC, and stays current whether or not
+your laptop is on. This is the one to set up.
+
+**On this PC** — the rest of this file. Same app, running locally against a
+SQLite file, with a 07:00 scheduled refresh.
+
+---
+
+## Daily use on this PC
 
 Double-click **`Start Opportunity Finder.bat`**.
 
@@ -185,6 +196,10 @@ Unregister-ScheduledTask -TaskName "Opportunity Finder daily refresh" -Confirm:$
 
 ```
 app.py                       Flask server and JSON API
+export.py                    builds the standalone phone snapshot
+check_database.py            proves a database works before deploying
+finder/db.py                 SQLite locally, Postgres when DATABASE_URL is set
+render.yaml, Procfile        hosting configuration
 rescore.py                   re-score stored postings after editing the profile
 finder/profile.py            the CV model - topics, roles, countries, weights
 finder/config.py             search phrases, crawl limits, source switches
