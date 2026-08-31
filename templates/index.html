@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opportunity Finder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="mark">RT</div>
+    <div>
+      <h1>Opportunity Finder</h1>
+      <p class="sub">Faculty, fellowship and postdoc posts matched to your CV</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="refresh-state" id="refreshState"></div>
+    <button id="refreshBtn" class="btn primary">
+      <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M12 4V1L8 5l4 4V6a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg>
+      <span>Refresh now</span>
+    </button>
+    <button id="themeBtn" class="btn icon" title="Toggle theme" aria-label="Toggle theme">◐</button>
+  </div>
+</header>
+
+<section class="stats" id="stats"></section>
+
+<div class="layout">
+
+  <details class="filters" id="filters" open>
+    <summary class="filters-toggle">
+      <span>Filters &amp; search</span>
+      <span class="filters-hint" id="filtersHint"></span>
+    </summary>
+
+    <div class="filter-block">
+      <label class="lbl" for="q">Search</label>
+      <input type="search" id="q" placeholder="title, university, city&hellip;" autocomplete="off">
+    </div>
+
+    <div class="filter-block">
+      <label class="lbl" for="minScore">Minimum match <span class="val" id="minScoreVal">45</span></label>
+      <input type="range" id="minScore" min="0" max="95" step="5" value="45">
+    </div>
+
+    <div class="filter-block">
+      <span class="lbl">Post type</span>
+      <div id="roleFacets" class="chips"></div>
+    </div>
+
+    <div class="filter-block">
+      <span class="lbl">Deadline</span>
+      <div class="segmented" id="deadlineSeg">
+        <button data-v="live" class="on">Still open</button>
+        <button data-v="soon">Closing &lt;14d</button>
+        <button data-v="any">All</button>
+      </div>
+    </div>
+
+    <div class="filter-block">
+      <span class="lbl">First seen</span>
+      <div class="segmented" id="windowSeg">
+        <button data-v="any" class="on">Any time</button>
+        <button data-v="today">Today</button>
+        <button data-v="week">7 days</button>
+      </div>
+    </div>
+
+    <div class="filter-block">
+      <span class="lbl">Your list</span>
+      <div class="segmented" id="statusSeg">
+        <button data-v="open" class="on">Active</button>
+        <button data-v="saved">Saved</button>
+        <button data-v="applied">Applied</button>
+        <button data-v="dismissed">Hidden</button>
+      </div>
+    </div>
+
+    <div class="filter-block">
+      <span class="lbl">Country</span>
+      <div id="countryFacets" class="facet-list"></div>
+    </div>
+
+    <div class="filter-block">
+      <span class="lbl">Source</span>
+      <div id="sourceFacets" class="facet-list"></div>
+    </div>
+
+    <button class="btn ghost wide" id="clearBtn">Clear all filters</button>
+
+    <div class="profile-card">
+      <h3>Matched against</h3>
+      <p><strong>{{ candidate.name }}</strong></p>
+      <p class="tiny">{{ candidate.phd }}</p>
+      <p class="tiny">{{ candidate.metrics.journal_articles }} journal articles &middot;
+         h-index {{ candidate.metrics.h_index }} &middot;
+         {{ candidate.metrics.citations }}+ citations</p>
+      <p class="tiny muted">Scoring weights live in <code>finder/profile.py</code>.</p>
+    </div>
+  </details>
+
+  <main>
+    <div class="results-head">
+      <div id="resultCount" class="count">&nbsp;</div>
+      <label class="sortwrap">Sort
+        <select id="sort">
+          <option value="score">Best match</option>
+          <option value="deadline">Deadline first</option>
+          <option value="newest">Newest found</option>
+        </select>
+      </label>
+    </div>
+    <div id="list" class="list"></div>
+    <div id="empty" class="empty" hidden></div>
+  </main>
+</div>
+
+<div id="drawer" class="drawer" hidden>
+  <div class="drawer-inner">
+    <button class="drawer-close" id="drawerClose" aria-label="Close">&times;</button>
+    <div id="drawerBody"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

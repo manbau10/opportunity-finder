@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+data/*.db
+data/*.log
+data/phone-snapshot.html
+*.docx
+.venv/

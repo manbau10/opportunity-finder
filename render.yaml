@@ -1,0 +1,23 @@
+# Render blueprint. With this file in the repo, Render's "New Blueprint"
+# flow configures the service without any manual form filling.
+#
+# DATABASE_URL is left unset here on purpose: paste the connection string from
+# your Postgres provider into the Render dashboard as an environment variable,
+# so the secret never lives in the repository.
+
+services:
+  - type: web
+    name: opportunity-finder
+    runtime: python
+    plan: free
+    region: frankfurt          # closest free region to Hong Kong; change if you prefer
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 120
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      - key: STALE_AFTER_HOURS
+        value: "10"
+      - key: DATABASE_URL
+        sync: false            # set this in the dashboard, not in the repo
