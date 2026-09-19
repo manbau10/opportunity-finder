@@ -1,0 +1,40 @@
+name: Daily opportunity refresh
+
+on:
+  schedule:
+    # 07:00 Asia/Hong_Kong (23:00 UTC on the previous day).
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Wake the app and start collection
+        run: |
+          curl --fail --show-error --silent \
+            --retry 6 --retry-delay 15 --max-time 180 \
+            -X POST https://opportunity-finder-uz4x.onrender.com/api/refresh
+
+      - name: Wait for collection to finish
+        run: |
+          for attempt in $(seq 1 34); do
+            payload=$(curl --fail --show-error --silent \
+              --retry 3 --retry-delay 10 --max-time 180 \
+              https://opportunity-finder-uz4x.onrender.com/api/refresh/status)
+            echo "$payload"
+            running=$(echo "$payload" | jq -r '.running')
+            error=$(echo "$payload" | jq -r '.error // empty')
+            if [ -n "$error" ]; then
+              echo "Refresh failed: $error" >&2
+              exit 1
+            fi
+            if [ "$running" = "false" ]; then
+              test "$(echo "$payload" | jq -r '.stage')" = "done"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "Refresh did not finish within the workflow timeout." >&2
+          exit 1

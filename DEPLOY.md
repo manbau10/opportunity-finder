@@ -105,10 +105,11 @@ The database starts empty, so the first time you open the link the app begins
 collecting in the background. The page loads straight away but looks bare;
 give it five to ten minutes and reload, and the postings will be there.
 
-From then on, every visit checks how old the data is. If it is more than ten
-hours old, a fresh collection starts in the background while you read what is
-already there. That is why there is no scheduler: **opening the link is what
-keeps it current.**
+From then on, GitHub Actions wakes the hosted app and runs a full collection at
+07:00 Hong Kong time every day. Every visit also checks how old the data is. If
+it is more than ten hours old, a fresh collection starts in the background
+while you read what is already there. The scheduled run does not depend on your
+laptop being switched on.
 
 ---
 
@@ -120,16 +121,9 @@ usually 30 to 60 seconds of blank screen or a spinner. After that it is quick
 until it goes idle again. Nothing is broken; that is the free tier working as
 designed.
 
-**A collection can be interrupted.** If you open the link and close the tab
-straight away, Render may suspend the service part way through collecting. The
-app writes each job board's results to the database as soon as it has them,
-rather than holding everything to the end, so an interrupted run keeps whatever
-it had already finished and the next visit carries on. You may just see the
-count climb over a couple of visits.
-
-If you want to avoid both, a free uptime pinger such as **cron-job.org** hitting
-your `/healthz` address every morning will wake the service and trigger the
-day's collection before you look at it.
+**The scheduled collection takes several minutes.** The GitHub workflow waits
+for it to finish, so Render remains awake for the whole run. You can also start
+the same process with the app's Refresh button at any time.
 
 ---
 

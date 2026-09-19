@@ -9,8 +9,8 @@ Ridwan A. Taiwo's CV.
 ## Two ways to use it
 
 **Online, from any device** — see [DEPLOY.md](DEPLOY.md). One link that works on
-your phone, someone else's phone, or any PC, and stays current whether or not
-your laptop is on. This is the one to set up.
+your phone, someone else's phone, or any PC. GitHub Actions refreshes it daily
+at 07:00 Hong Kong time, whether or not your laptop is on.
 
 **On this PC** — the rest of this file. Same app, running locally against a
 SQLite file, with a 07:00 scheduled refresh.
