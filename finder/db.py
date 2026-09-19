@@ -159,6 +159,10 @@ class _Cursor:
         self._raw.execute(_translate(sql), tuple(params))
         return self
 
+    def executemany(self, sql: str, params_seq):
+        self._raw.executemany(_translate(sql), params_seq)
+        return self
+
     def fetchone(self):
         return self._raw.fetchone()
 

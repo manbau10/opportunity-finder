@@ -63,6 +63,10 @@ def _row(item: dict, now: str) -> tuple:
 
 def upsert_many(conn: db.Connection, items: Iterable[dict]) -> tuple[int, int]:
     """Insert new postings, refresh the mutable fields of ones we already have."""
+    items = list(items)
+    if db.IS_POSTGRES and items:
+        return _upsert_many_postgres(conn, items)
+
     now = dt.datetime.now().isoformat(timespec="seconds")
     added = updated = 0
     cur = conn.cursor()
@@ -96,6 +100,42 @@ def upsert_many(conn: db.Connection, items: Iterable[dict]) -> tuple[int, int]:
             updated += 1
     conn.commit()
     return added, updated
+
+
+def _upsert_many_postgres(conn: db.Connection, items: list[dict]) -> tuple[int, int]:
+    """Bulk Postgres upsert: a few round trips instead of two per posting."""
+    now = dt.datetime.now().isoformat(timespec="seconds")
+    ids = [item["id"] for item in items]
+    existing: set[str] = set()
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        placeholders = ",".join("?" for _ in chunk)
+        rows = conn.execute(
+            "SELECT id FROM opportunities WHERE id IN (%s)" % placeholders,
+            chunk).fetchall()
+        existing.update(row["id"] for row in rows)
+
+    mutable = [
+        "title", "org", "department", "location", "country", "country_tier",
+        "description", "posted", "deadline", "days_left", "role_key",
+        "role_label", "score", "matched_terms", "flags", "positives",
+        "breakdown", "enriched", "last_seen",
+    ]
+    update_sql = ",".join(f"{field}=EXCLUDED.{field}" for field in mutable)
+    width = len(FIELDS)
+    for start in range(0, len(items), 200):
+        chunk = items[start:start + 200]
+        values_sql = ",".join(
+            "(" + ",".join("?" for _ in range(width)) + ")" for _ in chunk)
+        params = [value for item in chunk for value in _row(item, now)]
+        conn.execute(
+            "INSERT INTO opportunities (%s) VALUES %s "
+            "ON CONFLICT (id) DO UPDATE SET %s"
+            % (",".join(FIELDS), values_sql, update_sql),
+            params)
+    conn.commit()
+    added = sum(1 for item in items if item["id"] not in existing)
+    return added, len(items) - added
 
 
 def recompute_days_left(conn: db.Connection) -> None:
