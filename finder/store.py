@@ -148,17 +148,19 @@ def _upsert_many_postgres(conn: db.Connection, items: list[dict]) -> tuple[int, 
 
 
 def recompute_days_left(conn: db.Connection) -> None:
-    """days_left is relative to today, so refresh it whenever the app starts."""
-    from .scoring import _parse_date
-    today = dt.date.today()
-    rows = conn.execute(
-        "SELECT id, deadline FROM opportunities WHERE deadline IS NOT NULL AND deadline != ''"
-    ).fetchall()
-    for row in rows:
-        d = _parse_date(row["deadline"])
-        if d:
-            conn.execute("UPDATE opportunities SET days_left=? WHERE id=?",
-                         ((d - today).days, row["id"]))
+    """Update ISO deadlines in one database operation instead of one network trip per job."""
+    if db.IS_POSTGRES:
+        conn.execute(
+            """UPDATE opportunities
+               SET days_left = CAST(deadline AS date) - CURRENT_DATE
+               WHERE deadline ~ '^\\d{4}-\\d{2}-\\d{2}$'"""
+        )
+    else:
+        conn.execute(
+            """UPDATE opportunities
+               SET days_left = CAST(julianday(deadline) - julianday(date('now')) AS INTEGER)
+               WHERE deadline GLOB '????-??-??'"""
+        )
     conn.commit()
 
 

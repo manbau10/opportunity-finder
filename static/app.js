@@ -391,7 +391,7 @@ async function pollRefresh() {
 
 $('#refreshBtn').addEventListener('click', async () => {
   $('#refreshBtn').disabled = true;
-  await fetch('/api/refresh', { method: 'POST' });
+  await fetch('/api/refresh?track=' + encodeURIComponent(appConfig.track), { method: 'POST' });
   toast('Searching the job boards… this takes a few minutes.');
   pollRefresh();
 });

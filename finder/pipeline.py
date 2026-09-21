@@ -86,7 +86,7 @@ def _save(items: list[dict]) -> tuple[int, int]:
         conn.close()
 
 
-def run_refresh(enrich_details: bool = True) -> dict:
+def run_refresh(enrich_details: bool = True, tracks: set[str] | None = None) -> dict:
     """
     One full collection pass.
 
@@ -94,6 +94,7 @@ def run_refresh(enrich_details: bool = True) -> dict:
     everything being held until the end. On a host that suspends idle services
     a run can be cut off part way, and this way the work already done survives.
     """
+    tracks = tracks or {"academic", "industry"}
     with _LOCK:
         if STATE["running"]:
             return dict(STATE)
@@ -108,7 +109,7 @@ def run_refresh(enrich_details: bool = True) -> dict:
     everything: list[dict] = []
 
     try:
-        for key, module in REGISTRY.items():
+        for key, module in (REGISTRY.items() if "academic" in tracks else []):
             if not SOURCES_ENABLED.get(key, True):
                 continue
             STATE["stage"] = "searching %s" % module.NAME
@@ -140,17 +141,18 @@ def run_refresh(enrich_details: bool = True) -> dict:
             everything.extend(fresh)
             _log("  -> %d postings (%d new)" % (len(fresh), added))
 
-        STATE["stage"] = "searching industry jobs"
-        _log("[Industry jobs]")
-        try:
-            industry_items = industry.fetch(_log)
-            added, updated = _save(industry_items)
-            STATE["added"] += added
-            STATE["updated"] += updated
-            STATE["found"] += len(industry_items)
-            _log("  -> %d industry postings (%d new)" % (len(industry_items), added))
-        except Exception as exc:
-            _log("  !! Industry sources failed: %s" % exc)
+        if "industry" in tracks:
+            STATE["stage"] = "searching industry jobs"
+            _log("[Industry jobs]")
+            try:
+                industry_items = industry.fetch(_log)
+                added, updated = _save(industry_items)
+                STATE["added"] += added
+                STATE["updated"] += updated
+                STATE["found"] += len(industry_items)
+                _log("  -> %d industry postings (%d new)" % (len(industry_items), added))
+            except Exception as exc:
+                _log("  !! Industry sources failed: %s" % exc)
 
         if enrich_details:
             STATE["stage"] = "reading adverts for deadlines"
@@ -222,7 +224,8 @@ def run_refresh(enrich_details: bool = True) -> dict:
     return dict(STATE)
 
 
-def run_refresh_background() -> None:
+def run_refresh_background(tracks: set[str] | None = None) -> None:
     if STATE["running"]:
         return
-    threading.Thread(target=run_refresh, daemon=True, name="refresh").start()
+    threading.Thread(target=run_refresh, kwargs={"tracks": tracks}, daemon=True,
+                     name="refresh").start()
