@@ -208,7 +208,9 @@ def settings_page():
 
 @app.route("/healthz")
 def healthz():
-    return jsonify({"ok": True, "backend": db.backend()})
+    return jsonify({"ok": True, "backend": db.backend(),
+                    "matcher_version": matching.MATCHER_VERSION,
+                    "default_search": providers.public_catalog()["search"][0]})
 
 
 @app.route("/api/opportunities")
