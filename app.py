@@ -382,7 +382,9 @@ def api_refresh():
     if pipeline.STATE["running"]:
         return jsonify({"ok": False, "message": "already running",
                         "state": pipeline.STATE})
-    pipeline.run_refresh_background()
+    track = request.args.get("track")
+    tracks = {track} if track in {"academic", "industry"} else None
+    pipeline.run_refresh_background(tracks)
     return jsonify({"ok": True, "state": pipeline.STATE})
 
 

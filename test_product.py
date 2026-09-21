@@ -145,6 +145,18 @@ class ProductFlowTest(unittest.TestCase):
         profile = build_profile(cv, "industry")
         self.assertIn("Cybersecurity Consultant", profile["target_titles"])
 
+    def test_refresh_button_selects_only_the_current_track(self):
+        client = app.test_client()
+        was_running = pipeline.STATE["running"]
+        pipeline.STATE["running"] = False
+        try:
+            with patch.object(pipeline, "run_refresh_background") as start:
+                response = client.post("/api/refresh?track=industry")
+                self.assertEqual(response.status_code, 200)
+                start.assert_called_once_with({"industry"})
+        finally:
+            pipeline.STATE["running"] = was_running
+
     def test_end_to_end_account_isolation(self):
         one, csrf_one, uid_one = self._register(EMAILS[0])
         two, csrf_two, uid_two = self._register(EMAILS[1])
