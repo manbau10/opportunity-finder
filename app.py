@@ -460,7 +460,17 @@ def api_test_provider():
     try:
         answer = providers.chat(g.user["id"], "Reply with exactly: connection successful",
                                 "Test this provider configuration.", max_tokens=30)
-        return jsonify({"ok": True, "response": answer[:200]})
+        config = providers.get_config(g.user["id"], include_keys=True) or {}
+        search_provider = config.get("search_provider", "duckduckgo")
+        search_results = None
+        if search_provider != "duckduckgo":
+            from finder.research import _search
+            search_results = len(_search(
+                'registered nurse job Canada apply', search_provider,
+                config.get("search_key", ""), limit=2))
+        return jsonify({"ok": True, "response": answer[:200],
+                        "search_provider": search_provider,
+                        "search_results": search_results})
     except Exception as exc:
         return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 400
 

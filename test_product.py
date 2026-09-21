@@ -17,7 +17,7 @@ from finder import pipeline, store
 from finder import application_pack
 from finder.matching import score_for_profile
 from finder.profiles import build_profile
-from finder.industry import _direct_job_result, _parse_nhs_xml
+from finder.industry import _direct_job_result, _parse_nhs_xml, _worldwide_job_result
 
 EMAILS = ("product-test-one@example.invalid", "product-test-two@example.invalid")
 OPP_IDS = ("__product_academic__", "__product_industry__")
@@ -138,6 +138,20 @@ class ProductFlowTest(unittest.TestCase):
             "title": "Nursing jobs", "url": "https://jobs.lever.co/next-health",
             "snippet": ""}, "nursing", "registered nurse")
         self.assertIsNone(landing)
+
+    def test_worldwide_search_keeps_direct_jobs_not_articles(self):
+        direct = _worldwide_job_result({
+            "title": "Registered Nurse - Emergency Department | Example Health",
+            "url": "https://careers.example.ca/jobs/registered-nurse-123",
+            "snippet": "Apply for this registered nurse role.",
+        }, "registered nurse", "Canada", "serper", "registered nurse Canada")
+        self.assertIsNotNone(direct)
+        self.assertEqual(direct["country"], "Canada")
+        article = _worldwide_job_result({
+            "title": "How to become a registered nurse in Canada",
+            "url": "https://example.ca/blog/nursing-guide", "snippet": "Guide",
+        }, "registered nurse", "Canada", "serper", "registered nurse Canada")
+        self.assertIsNone(article)
 
     def test_unknown_profession_still_gets_search_titles(self):
         cv = ("PROFESSIONAL EXPERIENCE\nCybersecurity Consultant\n"

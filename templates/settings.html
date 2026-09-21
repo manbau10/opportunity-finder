@@ -34,6 +34,11 @@
     <button class="btn primary" type="button" id="saveTestProvider">Save and test</button>
     <span id="providerStatus" class="form-status" aria-live="polite"></span></div>
 </form>
+<section class="settings-card" id="worldwideSearchGuide"><div class="eyebrow">Worldwide job coverage</div>
+  <h2>Use Google results through Serper</h2>
+  <p>DuckDuckGo requires no key, but cloud-hosted searches can return limited job results. For country-by-country discovery, select <b>Serper</b>, create a separate search key at <a href="https://serper.dev/" target="_blank" rel="noopener">serper.dev</a>, paste it above, and press <b>Save and test</b>.</p>
+  <p class="tiny muted">The search key is separate from your Poe AI key. Worldwide mode searches the candidate's target title across 24 markets. Preferred locations entered under CVs replace the default market list.</p>
+</section>
 <section class="settings-card"><h2>Supported providers</h2>
 <p class="tiny">AI: Poe, OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, Mistral, Ollama, LM Studio and HTTPS OpenAI-compatible endpoints.</p>
 <p class="tiny">Search: DuckDuckGo without a key, or Tavily, Brave Search and Serper with your key.</p>
@@ -51,7 +56,7 @@ searchProvider.addEventListener('change',showSearchKey);showSearchKey();
 async function save(testAfter=false){status.textContent=testAfter?'Saving securely…':'Saving…';status.className='form-status';const body=Object.fromEntries(new FormData(form));
 const r=await fetch('/api/providers',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':APP.csrf},body:JSON.stringify(body)});const d=await r.json();if(!r.ok){status.textContent=d.error||'Save failed';status.className='form-status error';return false;}
 if(!testAfter){status.textContent='Settings saved securely';status.className='form-status success';return true;}
-status.textContent='Saved. Testing the AI connection…';const tr=await fetch('/api/providers/test',{method:'POST',headers:{'X-CSRF-Token':APP.csrf}});const td=await tr.json();status.textContent=tr.ok?'Connection successful — you can now create application packs':(td.error||'The settings were saved, but the connection test failed');status.className='form-status '+(tr.ok?'success':'error');return tr.ok;}
+status.textContent='Saved. Testing AI and web search…';const tr=await fetch('/api/providers/test',{method:'POST',headers:{'X-CSRF-Token':APP.csrf}});const td=await tr.json();status.textContent=tr.ok?'AI and search connections successful — worldwide discovery is ready':(td.error||'The settings were saved, but a connection test failed');status.className='form-status '+(tr.ok?'success':'error');return tr.ok;}
 form.addEventListener('submit',e=>{e.preventDefault();save(false);});
 document.querySelector('#saveTestProvider').onclick=()=>save(true);
 </script></body></html>

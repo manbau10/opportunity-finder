@@ -24,6 +24,15 @@ WEB_JOB_HOSTS = (
     "jobs.ashbyhq.com", "apply.workable.com", "jobs.smartrecruiters.com",
     "myworkdayjobs.com",
 )
+WORLDWIDE_MARKETS = (
+    "United States", "Canada", "Australia", "New Zealand", "Ireland",
+    "Germany", "France", "Netherlands", "Belgium", "Switzerland",
+    "Austria", "Denmark", "Norway", "Sweden", "Finland", "Singapore",
+    "United Arab Emirates", "Saudi Arabia", "Qatar", "South Africa",
+    "Hong Kong", "Nigeria", "Ghana", "Kenya",
+)
+JOB_URL_CUES = ("/job/", "/jobs/", "/jobadvert/", "/vacancy/", "/vacancies/",
+                "/position/", "/positions/", "/requisition/", "jobid=", "gh_jid=")
 
 
 def _id(source: str, url: str, title: str) -> str:
@@ -103,7 +112,7 @@ def _fetch_nhs(log=print, pages: int = 5) -> list[dict]:
     return list(found.values())
 
 
-def _profile_search_specs() -> list[tuple[str, list[str], str, str]]:
+def _profile_search_specs() -> list[tuple[str, list[str], list[str], str, str]]:
     """Return occupation-level searches without sending CV text to the web."""
     conn = store.connect()
     try:
@@ -129,11 +138,14 @@ def _profile_search_specs() -> list[tuple[str, list[str], str, str]]:
             cfg = {}
         provider = cfg.get("search_provider") or "duckduckgo"
         key = cfg.get("search_key") or ""
-        signature = (domain, provider)
+        locations = [str(x).strip() for x in profile.get("preferred_locations") or []
+                     if str(x).strip()]
+        signature = (domain, tuple(t.lower() for t in titles[:3]),
+                     tuple(x.lower() for x in locations), provider)
         if signature in seen:
             continue
         seen.add(signature)
-        specs.append((domain, titles[:3], provider, key))
+        specs.append((domain, titles[:3], locations, provider, key))
     return specs
 
 
@@ -178,10 +190,32 @@ def _direct_job_result(result: dict, domain: str, query: str) -> dict | None:
     return _item(source, source_key, title, org, "", url, snippet, "", query)
 
 
+def _worldwide_job_result(result: dict, target_title: str, country: str,
+                          provider: str, query: str) -> dict | None:
+    url = (result.get("url") or "").split("#", 1)[0]
+    parsed = urlparse(url)
+    path = parsed.path.lower() + ("?" + parsed.query.lower() if parsed.query else "")
+    if not url.startswith("https://") or not any(cue in path for cue in JOB_URL_CUES):
+        return None
+    title = re.sub(r"\s+[|–—]\s+.*$", "", result.get("title") or "").strip()
+    target_words = {w for w in re.findall(r"[a-z]{4,}", target_title.lower())}
+    title_words = {w for w in re.findall(r"[a-z]{4,}", title.lower())}
+    if not title or not target_words or len(target_words & title_words) < min(2, len(target_words)):
+        return None
+    host = parsed.netloc.lower().removeprefix("www.")
+    org = host.split(".")[0].replace("-", " ").title()
+    label = {"serper": "Google via Serper", "brave": "Brave Search",
+             "tavily": "Tavily"}.get(provider, provider.title())
+    item = _item(f"Worldwide web — {label}", f"worldwide_{provider}", title,
+                 org, country, url, result.get("snippet") or "", "", query)
+    item["country"], item["country_tier"] = country, "target"
+    return item
+
+
 def _fetch_profile_web_jobs(log=print) -> list[dict]:
     """Search direct employer ATS pages using each profile's chosen web provider."""
     found: dict[str, dict] = {}
-    for domain, titles, provider, key in _profile_search_specs():
+    for domain, titles, locations, provider, key in _profile_search_specs():
         count = 0
         for title in titles:
             for host in WEB_JOB_HOSTS:
@@ -197,6 +231,27 @@ def _fetch_profile_web_jobs(log=print) -> list[dict]:
                         found[item["id"]] = item
                         count += 1
         log(f"  web search ({provider}): {domain:<22} {count:3d} direct adverts")
+        # Paid/search-API providers are reliable from cloud servers and can
+        # search country by country. DuckDuckGo HTML is retained as a free
+        # fallback but is too inconsistent on hosting data-centres for this pass.
+        if provider in {"serper", "brave", "tavily"} and key:
+            markets = locations or list(WORLDWIDE_MARKETS)
+            target_title = titles[0]
+            country_count = 0
+            for country in markets[:30]:
+                query = f'"{target_title}" job "{country}" apply'
+                try:
+                    results = _search(query, provider, key, limit=6)
+                except Exception as exc:
+                    log(f"  !! {provider} country search failed for {country}: {exc}")
+                    continue
+                for result in results:
+                    item = _worldwide_job_result(result, target_title, country, provider, query)
+                    if item:
+                        found[item["id"]] = item
+                        country_count += 1
+            log(f"  worldwide ({provider}): {domain:<22} {country_count:3d} direct adverts "
+                f"across {len(markets[:30])} markets")
     return list(found.values())
 
 
