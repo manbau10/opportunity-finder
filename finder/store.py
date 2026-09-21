@@ -13,11 +13,11 @@ from . import db
 FIELDS = ["id", "source", "source_key", "title", "org", "department", "location",
           "country", "country_tier", "url", "description", "posted", "deadline",
           "days_left", "role_key", "role_label", "score", "matched_terms",
-          "flags", "positives", "breakdown", "query", "enriched", "first_seen",
-          "last_seen", "status"]
+          "flags", "positives", "breakdown", "query", "enriched", "career_track",
+          "first_seen", "last_seen", "status"]
 
 # Columns added after the first release; created on connect if missing.
-LATER_COLUMNS = (("positives", "TEXT"),)
+LATER_COLUMNS = (("positives", "TEXT"), ("career_track", "TEXT DEFAULT 'academic'"))
 
 
 _schema_ready = False
@@ -51,6 +51,8 @@ def _migrate(conn: db.Connection) -> None:
             changed = True
     if changed:
         conn.commit()
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_track ON opportunities(career_track)")
+    conn.commit()
 
 
 def _enc(value):
@@ -58,7 +60,13 @@ def _enc(value):
 
 
 def _row(item: dict, now: str) -> tuple:
-    return tuple(_enc(item.get(f)) for f in FIELDS[:-3]) + (now, now, item.get("status", "new"))
+    values = []
+    for field in FIELDS[:-3]:
+        value = item.get(field)
+        if field == "career_track":
+            value = value or "academic"
+        values.append(_enc(value))
+    return tuple(values) + (now, now, item.get("status", "new"))
 
 
 def upsert_many(conn: db.Connection, items: Iterable[dict]) -> tuple[int, int]:
@@ -120,6 +128,7 @@ def _upsert_many_postgres(conn: db.Connection, items: list[dict]) -> tuple[int, 
         "description", "posted", "deadline", "days_left", "role_key",
         "role_label", "score", "matched_terms", "flags", "positives",
         "breakdown", "enriched", "last_seen",
+        "career_track",
     ]
     update_sql = ",".join(f"{field}=EXCLUDED.{field}" for field in mutable)
     width = len(FIELDS)

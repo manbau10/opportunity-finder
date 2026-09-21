@@ -14,10 +14,10 @@
 
 <header class="topbar">
   <div class="brand">
-    <div class="mark">RT</div>
+    <div class="mark">OF</div>
     <div>
       <h1>Opportunity Finder</h1>
-      <p class="sub">Faculty, fellowship and postdoc posts matched to your CV</p>
+      <p class="sub">Private opportunities and application packs matched to your CV</p>
     </div>
   </div>
   <div class="topbar-right">
@@ -27,8 +27,27 @@
       <span>Refresh now</span>
     </button>
     <button id="themeBtn" class="btn icon" title="Toggle theme" aria-label="Toggle theme">◐</button>
+    <a class="btn" href="{{ url_for('profile_page') }}">CVs</a>
+    <a class="btn" href="{{ url_for('settings_page') }}">API settings</a>
+    <form method="post" action="{{ url_for('logout') }}" class="inline-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf }}">
+      <button class="btn ghost" type="submit">Sign out</button>
+    </form>
   </div>
 </header>
+
+<nav class="track-tabs" aria-label="Career track">
+  <a class="{{ 'on' if track == 'academic' else '' }}" href="/?track=academic">Academic jobs</a>
+  <a class="{{ 'on' if track == 'industry' else '' }}" href="/?track=industry">Industry jobs</a>
+</nav>
+
+{% if not profile %}
+<section class="setup-banner">
+  <div><strong>Upload your {{ track }} CV to calculate private match scores.</strong>
+    Academic and industry profiles are kept separate.</div>
+  <a class="btn primary" href="{{ url_for('profile_page') }}">Upload CV</a>
+</section>
+{% endif %}
 
 <section class="stats" id="stats"></section>
 
@@ -97,12 +116,14 @@
 
     <div class="profile-card">
       <h3>Matched against</h3>
-      <p><strong>{{ candidate.name }}</strong></p>
-      <p class="tiny">{{ candidate.phd }}</p>
-      <p class="tiny">{{ candidate.metrics.journal_articles }} journal articles &middot;
-         h-index {{ candidate.metrics.h_index }} &middot;
-         {{ candidate.metrics.citations }}+ citations</p>
-      <p class="tiny muted">Scoring weights live in <code>finder/profile.py</code>.</p>
+      <p><strong>{{ user.name }}</strong></p>
+      {% if profile %}
+      <p class="tiny">{{ profile.cv_filename }}</p>
+      <p class="tiny">{{ (profile.profile.keywords or [])[:7] | join(' · ') }}</p>
+      <p class="tiny muted">Updated {{ profile.updated_at[:10] }}</p>
+      {% else %}
+      <p class="tiny muted">No {{ track }} CV uploaded yet.</p>
+      {% endif %}
     </div>
   </details>
 
@@ -131,6 +152,7 @@
 
 <div id="toast" class="toast" hidden></div>
 
+<script>window.APP = {{ {'track': track, 'csrf': csrf, 'profileReady': profile is not none} | tojson }};</script>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

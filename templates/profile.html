@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Your CVs | Opportunity Finder</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body>
+<header class="topbar"><div class="brand"><div class="mark">OF</div><div><h1>Your CV profiles</h1>
+<p class="sub">Keep academic and industry evidence separate</p></div></div>
+<div class="topbar-right"><a class="btn" href="/">Back to opportunities</a></div></header>
+<main class="settings-shell">
+  <div class="page-intro"><h2>Two CVs, two matching profiles</h2>
+  <p>Upload PDF, DOCX or text files up to 6 MB. Replacing a CV recalculates every match for that track.</p></div>
+  <div class="profile-grid">
+  {% for kind, label in [('academic','Academic CV'),('industry','Industry CV')] %}
+    {% set p = profiles[kind] %}
+    <section class="settings-card">
+      <span class="eyebrow">{{ kind }} jobs</span><h2>{{ label }}</h2>
+      {% if p %}<p><strong>{{ p.cv_filename }}</strong></p>
+      <p class="tiny">{{ (p.profile.keywords or [])[:12] | join(' · ') }}</p>
+      <p class="tiny muted">Last updated {{ p.updated_at[:16] | replace('T',' ') }}</p>
+      {% else %}<p class="muted">Not uploaded yet.</p>{% endif %}
+      <form class="upload-form" data-kind="{{ kind }}">
+        <input type="file" name="cv" accept=".pdf,.docx,.txt,.md" required>
+        <button class="btn primary" type="submit">{{ 'Replace' if p else 'Upload' }} {{ label }}</button>
+        <span class="form-status" aria-live="polite"></span>
+      </form>
+    </section>
+  {% endfor %}
+  </div>
+</main>
+<script>window.APP={{ {'csrf': csrf} | tojson }};</script>
+<script>
+document.querySelectorAll('.upload-form').forEach(form => form.addEventListener('submit', async e => {
+  e.preventDefault(); const status=form.querySelector('.form-status'); const button=form.querySelector('button');
+  status.textContent='Reading CV and calculating matches…'; button.disabled=true;
+  const response=await fetch('/api/profiles/'+form.dataset.kind,{method:'POST',headers:{'X-CSRF-Token':APP.csrf},body:new FormData(form)});
+  const data=await response.json(); button.disabled=false;
+  if(!response.ok){status.textContent=data.error||'Upload failed';status.className='form-status error';return;}
+  status.textContent=`Ready — ${data.matched} opportunities scored`; status.className='form-status success';
+  setTimeout(()=>location.reload(),900);
+}));
+</script>
+</body></html>

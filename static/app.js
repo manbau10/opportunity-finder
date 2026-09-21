@@ -5,6 +5,7 @@ const state = {
   q: '', min_score: 45, roles: [], countries: [], sources: [],
   status: 'open', window: 'any', deadline: 'live', sort: 'score'
 };
+const appConfig = window.APP || { track: 'academic', csrf: '', profileReady: false };
 let lastItems = [];
 
 const $  = (s) => document.querySelector(s);
@@ -50,8 +51,13 @@ function query() {
 }
 
 async function load() {
-  const res = await fetch('/api/opportunities?' + query());
+  const res = await fetch('/api/opportunities?' + query() + '&track=' + encodeURIComponent(appConfig.track));
   const data = await res.json();
+  if (data.setup_required) {
+    lastItems = []; renderStats({}); renderFacets({roles:[],countries:[],sources:[]});
+    renderList([]); $('#empty').innerHTML = '<h3>Upload your ' + esc(appConfig.track) +
+      ' CV to begin</h3><p><a class="btn primary" href="/profile">Upload CV</a></p>'; return;
+  }
   lastItems = data.items;
   renderStats(data.summary);
   renderFacets(data.facets);
@@ -166,6 +172,7 @@ function card(item) {
       <button class="btn tiny" data-act="saved">${item.status === 'saved' ? '★ Saved' : '☆ Save'}</button>
       <button class="btn tiny" data-act="applied">${item.status === 'applied' ? '✓ Applied' : 'Applied'}</button>
       <button class="btn tiny ghost" data-act="dismissed">Hide</button>
+      <button class="btn tiny pack-btn" data-pack="${esc(item.id)}">Create application pack</button>
     </div>
   </article>`;
 }
@@ -190,13 +197,16 @@ function renderList(items) {
         await setStatus(el.dataset.id, next);
       });
     });
+    el.querySelectorAll('[data-pack]').forEach(btn => btn.addEventListener('click', ev => {
+      ev.stopPropagation(); createPack(btn.dataset.pack, btn);
+    }));
   });
 }
 
 async function setStatus(id, status) {
   await fetch('/api/status', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id, status })
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': appConfig.csrf },
+    body: JSON.stringify({ id, status, track: appConfig.track })
   });
   const label = { saved: 'Saved', applied: 'Marked as applied', dismissed: 'Hidden', new: 'Reset' }[status];
   toast(label || 'Updated');
@@ -205,7 +215,7 @@ async function setStatus(id, status) {
 
 /* ------------------------------------------------------------------ drawer */
 async function openDrawer(id) {
-  const res = await fetch('/api/opportunity/' + encodeURIComponent(id));
+  const res = await fetch('/api/opportunity/' + encodeURIComponent(id) + '?track=' + encodeURIComponent(appConfig.track));
   if (!res.ok) return;
   const it = await res.json();
   const b = it.breakdown || {};
@@ -257,6 +267,7 @@ async function openDrawer(id) {
       <button class="btn" data-d="saved">${it.status === 'saved' ? 'Unsave' : 'Save'}</button>
       <button class="btn" data-d="applied">${it.status === 'applied' ? 'Not applied' : 'Mark applied'}</button>
       <button class="btn ghost" data-d="dismissed">Hide this</button>
+      <button class="btn primary" id="drawerPack">Create Word application pack</button>
     </div>`;
 
   $('#drawer').hidden = false;
@@ -265,6 +276,36 @@ async function openDrawer(id) {
     await setStatus(it.id, it.status === want ? 'new' : want);
     $('#drawer').hidden = true;
   });
+  $('#drawerPack').onclick = () => createPack(it.id, $('#drawerPack'));
+}
+
+async function createPack(id, button) {
+  const old = button.textContent; button.disabled = true; button.textContent = 'Starting…';
+  const response = await fetch('/api/packs', {
+    method: 'POST', headers: {'Content-Type':'application/json','X-CSRF-Token':appConfig.csrf},
+    body: JSON.stringify({opportunity_id:id, track:appConfig.track})
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    button.disabled=false; button.textContent=old; toast(data.error || 'Could not create the pack.');
+    if (data.settings_url && confirm((data.error || '') + '\n\nOpen API settings now?')) location.href=data.settings_url;
+    return;
+  }
+  button.textContent='Researching and writing…';
+  for (let attempt=0; attempt<80; attempt++) {
+    await new Promise(resolve=>setTimeout(resolve,3000));
+    const statusResponse=await fetch('/api/packs/'+encodeURIComponent(data.id));
+    const pack=await statusResponse.json();
+    if (pack.status==='ready') {
+      button.textContent='Download ZIP'; button.disabled=false;
+      button.onclick=()=>{location.href='/api/packs/'+encodeURIComponent(data.id)+'/download';};
+      toast('Your editable Word application pack is ready.'); return;
+    }
+    if (pack.status==='failed') {
+      button.disabled=false; button.textContent=old; toast(pack.error || 'Pack generation failed.'); return;
+    }
+  }
+  button.disabled=false; button.textContent=old; toast('Generation is still running. Try again shortly.');
 }
 
 $('#drawerClose').onclick = () => { $('#drawer').hidden = true; };

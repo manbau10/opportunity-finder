@@ -13,20 +13,34 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import os
+import base64
+import io
+import json
 import sys
 import threading
 import webbrowser
 
-from flask import Flask, jsonify, render_template, request
+from flask import (Flask, flash, g, jsonify, redirect, render_template, request,
+                   send_file, session, url_for)
 
 from finder import db, pipeline, store
+from finder import auth, matching, profiles, providers
+from finder.application_pack import get_pack, start_pack
 from finder.config import DISPLAY_MIN_SCORE
-from finder.profile import CANDIDATE
 
 STALE_AFTER_HOURS = int(os.environ.get("STALE_AFTER_HOURS", "10"))
 
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
+app.config.update(
+    SECRET_KEY=os.environ.get("SECRET_KEY", "local-development-key-change-before-deploy"),
+    MAX_CONTENT_LENGTH=profiles.MAX_CV_BYTES + 1024 * 1024,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("RENDER", "").lower() == "true",
+    PERMANENT_SESSION_LIFETIME=dt.timedelta(days=14),
+)
+app.jinja_env.globals["csrf_token"] = auth.csrf_token
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +61,7 @@ def _hours_since_last_refresh() -> float | None:
     return (dt.datetime.now() - when).total_seconds() / 3600.0
 
 
-def _summary(conn) -> dict:
+def _global_summary(conn) -> dict:
     today = dt.date.today().isoformat()
     row = conn.execute(
         """SELECT
@@ -73,9 +87,37 @@ def _summary(conn) -> dict:
     }
 
 
+def _user_summary(conn, user_id: str, kind: str, min_score: int) -> dict:
+    today = dt.date.today().isoformat()
+    row = conn.execute(
+        """SELECT COUNT(*) AS total,
+                  SUM(CASE WHEN m.score >= 70 THEN 1 ELSE 0 END) AS strong,
+                  SUM(CASE WHEN substr(o.first_seen,1,10)=? THEN 1 ELSE 0 END) AS today,
+                  SUM(CASE WHEN m.status='saved' THEN 1 ELSE 0 END) AS saved,
+                  SUM(CASE WHEN m.status='applied' THEN 1 ELSE 0 END) AS applied,
+                  SUM(CASE WHEN o.days_left IS NOT NULL AND o.days_left BETWEEN 0 AND 7
+                           THEN 1 ELSE 0 END) AS closing
+           FROM user_matches m JOIN opportunities o ON o.id=m.opportunity_id
+           WHERE m.user_id=? AND m.profile_kind=? AND m.score>=?""",
+        (today, user_id, kind, min_score),
+    ).fetchone()
+    last = store.last_refresh(conn)
+    return {
+        "total": row["total"] or 0, "strong": row["strong"] or 0,
+        "new_today": row["today"] or 0, "saved": row["saved"] or 0,
+        "applied": row["applied"] or 0, "closing_soon": row["closing"] or 0,
+        "last_refresh": (last or {}).get("finished"), "last_added": (last or {}).get("added"),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+@app.before_request
+def _load_authenticated_user():
+    auth.load_user()
+
+
 @app.before_request
 def _refresh_if_stale():
     """
@@ -87,7 +129,7 @@ def _refresh_if_stale():
     The page renders immediately from what is already stored and picks up the
     new postings as they land.
     """
-    if request.path.startswith("/static") or request.path == "/api/refresh/status":
+    if request.path not in ("/", "/api/opportunities"):
         return
     if pipeline.STATE["running"]:
         return
@@ -97,8 +139,71 @@ def _refresh_if_stale():
 
 
 @app.route("/")
+@auth.login_required
 def index():
-    return render_template("index.html", candidate=CANDIDATE)
+    kind = request.args.get("track", "academic")
+    if kind not in ("academic", "industry"):
+        kind = "academic"
+    profile = profiles.get_profile(g.user["id"], kind)
+    return render_template("index.html", user=g.user, profile=profile, track=kind,
+                           csrf=auth.csrf_token())
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if g.user:
+        return redirect(url_for("index"))
+    if request.method == "POST":
+        auth.verify_csrf()
+        user, error = auth.register_user(request.form.get("name", ""),
+                                         request.form.get("email", ""),
+                                         request.form.get("password", ""))
+        if error:
+            flash(error, "error")
+        else:
+            auth.begin_session(user)
+            return redirect(url_for("profile_page"))
+    return render_template("auth.html", mode="register", csrf=auth.csrf_token())
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if g.user:
+        return redirect(url_for("index"))
+    if request.method == "POST":
+        auth.verify_csrf()
+        user = auth.authenticate(request.form.get("email", ""), request.form.get("password", ""))
+        if not user:
+            flash("Email address or password was not recognised.", "error")
+        else:
+            auth.begin_session(user)
+            session.permanent = True
+            return redirect(url_for("index"))
+    return render_template("auth.html", mode="login", csrf=auth.csrf_token())
+
+
+@app.route("/logout", methods=["POST"])
+@auth.login_required
+def logout():
+    auth.verify_csrf()
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.route("/profile")
+@auth.login_required
+def profile_page():
+    return render_template("profile.html", user=g.user,
+                           profiles=profiles.profile_summaries(g.user["id"]),
+                           csrf=auth.csrf_token())
+
+
+@app.route("/settings")
+@auth.login_required
+def settings_page():
+    return render_template("settings.html", user=g.user,
+                           config=providers.get_config(g.user["id"]),
+                           catalog=providers.public_catalog(), csrf=auth.csrf_token())
 
 
 @app.route("/healthz")
@@ -107,8 +212,16 @@ def healthz():
 
 
 @app.route("/api/opportunities")
+@auth.login_required
 def api_opportunities():
     args = request.args
+    kind = args.get("track", "academic")
+    if kind not in ("academic", "industry"):
+        return jsonify({"error": "unknown career track"}), 400
+    if not profiles.get_profile(g.user["id"], kind):
+        return jsonify({"items": [], "count": 0,
+                        "facets": {"countries": [], "roles": [], "sources": []},
+                        "summary": {}, "setup_required": True})
     min_score = int(args.get("min_score", DISPLAY_MIN_SCORE))
     roles = [r for r in args.get("roles", "").split(",") if r]
     countries = [c for c in args.get("countries", "").split(",") if c]
@@ -120,72 +233,89 @@ def api_opportunities():
     sort = args.get("sort", "score")             # score | deadline | newest
     limit = min(int(args.get("limit", 300)), 1000)
 
-    where = ["score >= ?"]
-    params: list = [min_score]
+    where = ["m.user_id = ?", "m.profile_kind = ?", "m.score >= ?", "o.career_track = ?"]
+    params: list = [g.user["id"], kind, min_score, kind]
 
     if roles:
-        where.append("role_key IN (%s)" % ",".join("?" * len(roles)))
+        where.append("o.role_key IN (%s)" % ",".join("?" * len(roles)))
         params += roles
     if countries:
-        where.append("country IN (%s)" % ",".join("?" * len(countries)))
+        where.append("o.country IN (%s)" % ",".join("?" * len(countries)))
         params += countries
     if sources:
-        where.append("source_key IN (%s)" % ",".join("?" * len(sources)))
+        where.append("o.source_key IN (%s)" % ",".join("?" * len(sources)))
         params += sources
 
     if status == "open":
-        where.append("status != 'dismissed'")
+        where.append("m.status != 'dismissed'")
     elif status != "all":
-        where.append("status = ?")
+        where.append("m.status = ?")
         params.append(status)
 
     if window != "any":
         days = {"today": 1, "week": 7, "month": 31}.get(window, 3650)
         cutoff = (dt.date.today() - dt.timedelta(days=days - 1)).isoformat()
-        where.append("substr(first_seen,1,10) >= ?")
+        where.append("substr(o.first_seen,1,10) >= ?")
         params.append(cutoff)
 
     if deadline == "live":
-        where.append("(days_left IS NULL OR days_left >= 0)")
+        where.append("(o.days_left IS NULL OR o.days_left >= 0)")
     elif deadline == "soon":
-        where.append("days_left IS NOT NULL AND days_left BETWEEN 0 AND 14")
+        where.append("o.days_left IS NOT NULL AND o.days_left BETWEEN 0 AND 14")
 
     if search:
-        where.append("(lower(title) LIKE ? OR lower(org) LIKE ? OR "
-                     "lower(location) LIKE ? OR lower(description) LIKE ?)")
+        where.append("(lower(o.title) LIKE ? OR lower(o.org) LIKE ? OR "
+                     "lower(o.location) LIKE ? OR lower(o.description) LIKE ?)")
         params += ["%%%s%%" % search] * 4
 
     order = {
-        "score": "score DESC, (days_left IS NULL), days_left ASC",
-        "deadline": "(days_left IS NULL), days_left ASC, score DESC",
-        "newest": "first_seen DESC, score DESC",
-    }.get(sort, "score DESC")
+        "score": "m.score DESC, (o.days_left IS NULL), o.days_left ASC",
+        "deadline": "(o.days_left IS NULL), o.days_left ASC, m.score DESC",
+        "newest": "o.first_seen DESC, m.score DESC",
+    }.get(sort, "m.score DESC")
 
     conn = store.connect()
     try:
         rows = conn.execute(
-            "SELECT * FROM opportunities WHERE %s ORDER BY %s LIMIT ?"
+            """SELECT o.*,m.score AS user_score,m.matched_terms AS user_terms,
+                      m.breakdown AS user_breakdown,m.status AS user_status
+               FROM user_matches m JOIN opportunities o ON o.id=m.opportunity_id
+               WHERE %s ORDER BY %s LIMIT ?"""
             % (" AND ".join(where), order), params + [limit]).fetchall()
-        items = [store.decode(r) for r in rows]
+        items = []
+        for row in rows:
+            item = store.decode(row)
+            item["score"] = item.pop("user_score")
+            item["status"] = item.pop("user_status")
+            item["matched_terms"] = json.loads(item.pop("user_terms") or "[]")
+            item["breakdown"] = json.loads(item.pop("user_breakdown") or "{}")
+            items.append(item)
         for item in items:
             item["description"] = (item.get("description") or "")[:600]
         facets = {
             "countries": [dict(r) for r in conn.execute(
-                "SELECT country AS name, COUNT(*) AS n FROM opportunities "
-                "WHERE score >= ? AND country != '' AND status != 'dismissed' "
-                "GROUP BY country ORDER BY n DESC", (min_score,)).fetchall()],
+                """SELECT o.country AS name,COUNT(*) AS n FROM user_matches m
+                   JOIN opportunities o ON o.id=m.opportunity_id
+                   WHERE m.user_id=? AND m.profile_kind=? AND m.score>=?
+                     AND o.country!='' AND m.status!='dismissed'
+                   GROUP BY o.country ORDER BY n DESC""",
+                (g.user["id"], kind, min_score)).fetchall()],
             # Both non-aggregated columns must appear in GROUP BY: SQLite lets
             # a bare role_key/source_key through, Postgres rejects it.
             "roles": [dict(r) for r in conn.execute(
-                "SELECT role_key AS key, role_label AS name, COUNT(*) AS n "
-                "FROM opportunities WHERE score >= ? AND status != 'dismissed' "
-                "GROUP BY role_key, role_label ORDER BY n DESC", (min_score,)).fetchall()],
+                """SELECT o.role_key AS key,o.role_label AS name,COUNT(*) AS n
+                   FROM user_matches m JOIN opportunities o ON o.id=m.opportunity_id
+                   WHERE m.user_id=? AND m.profile_kind=? AND m.score>=? AND m.status!='dismissed'
+                   GROUP BY o.role_key,o.role_label ORDER BY n DESC""",
+                (g.user["id"], kind, min_score)).fetchall()],
             "sources": [dict(r) for r in conn.execute(
-                "SELECT source_key AS key, source AS name, COUNT(*) AS n "
-                "FROM opportunities WHERE score >= ? AND status != 'dismissed' "
-                "GROUP BY source_key, source ORDER BY n DESC", (min_score,)).fetchall()],
+                """SELECT o.source_key AS key,o.source AS name,COUNT(*) AS n
+                   FROM user_matches m JOIN opportunities o ON o.id=m.opportunity_id
+                   WHERE m.user_id=? AND m.profile_kind=? AND m.score>=? AND m.status!='dismissed'
+                   GROUP BY o.source_key,o.source ORDER BY n DESC""",
+                (g.user["id"], kind, min_score)).fetchall()],
         }
-        summary = _summary(conn)
+        summary = _user_summary(conn, g.user["id"], kind, min_score)
     finally:
         conn.close()
 
@@ -194,29 +324,41 @@ def api_opportunities():
 
 
 @app.route("/api/opportunity/<opp_id>")
+@auth.login_required
 def api_opportunity(opp_id):
+    kind = request.args.get("track", "academic")
     conn = store.connect()
     try:
-        row = conn.execute("SELECT * FROM opportunities WHERE id = ?", (opp_id,)).fetchone()
+        row = conn.execute(
+            """SELECT o.*,m.score AS user_score,m.matched_terms AS user_terms,
+                      m.breakdown AS user_breakdown,m.status AS user_status
+               FROM user_matches m JOIN opportunities o ON o.id=m.opportunity_id
+               WHERE o.id=? AND m.user_id=? AND m.profile_kind=?""",
+            (opp_id, g.user["id"], kind)).fetchone()
     finally:
         conn.close()
     if row is None:
         return jsonify({"error": "not found"}), 404
-    return jsonify(store.decode(row))
+    item = store.decode(row)
+    item["score"] = item.pop("user_score"); item["status"] = item.pop("user_status")
+    item["matched_terms"] = json.loads(item.pop("user_terms") or "[]")
+    item["breakdown"] = json.loads(item.pop("user_breakdown") or "{}")
+    return jsonify(item)
 
 
 @app.route("/api/status", methods=["POST"])
+@auth.login_required
 def api_status():
+    auth.verify_csrf()
     data = request.get_json(force=True, silent=True) or {}
     opp_id, status = data.get("id"), data.get("status")
+    kind = data.get("track", "academic")
     if not opp_id or status not in ("new", "saved", "applied", "dismissed", "seen"):
         return jsonify({"error": "bad request"}), 400
+    matching.set_user_status(g.user["id"], opp_id, kind, status)
     conn = store.connect()
-    try:
-        store.set_status(conn, opp_id, status)
-        summary = _summary(conn)
-    finally:
-        conn.close()
+    try: summary = _user_summary(conn, g.user["id"], kind, DISPLAY_MIN_SCORE)
+    finally: conn.close()
     return jsonify({"ok": True, "summary": summary})
 
 
@@ -235,15 +377,96 @@ def api_refresh_status():
     state["lines"] = state["lines"][-40:]
     conn = store.connect()
     try:
-        state["summary"] = _summary(conn)
+        state["summary"] = _global_summary(conn)
     finally:
         conn.close()
     return jsonify(state)
 
 
-@app.route("/api/profile")
-def api_profile():
-    return jsonify(CANDIDATE)
+@app.route("/api/profiles")
+@auth.login_required
+def api_profiles():
+    return jsonify(profiles.profile_summaries(g.user["id"]))
+
+
+@app.route("/api/profiles/<kind>", methods=["POST"])
+@auth.login_required
+def api_upload_profile(kind):
+    auth.verify_csrf()
+    upload = request.files.get("cv")
+    if not upload or not upload.filename:
+        return jsonify({"error": "Choose a CV file to upload."}), 400
+    try:
+        result = profiles.save_profile(g.user["id"], kind, upload.filename,
+                                       upload.stream.read(profiles.MAX_CV_BYTES + 1))
+        result["matched"] = matching.rebuild_matches(g.user["id"], kind)
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/providers")
+@auth.login_required
+def api_provider_config():
+    return jsonify({"config": providers.get_config(g.user["id"]),
+                    "catalog": providers.public_catalog()})
+
+
+@app.route("/api/providers", methods=["POST"])
+@auth.login_required
+def api_save_provider():
+    auth.verify_csrf()
+    try:
+        config = providers.save_config(g.user["id"], request.get_json(silent=True) or {})
+        return jsonify({"ok": True, "config": config})
+    except (ValueError, RuntimeError) as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/api/providers/test", methods=["POST"])
+@auth.login_required
+def api_test_provider():
+    auth.verify_csrf()
+    try:
+        answer = providers.chat(g.user["id"], "Reply with exactly: connection successful",
+                                "Test this provider configuration.", max_tokens=30)
+        return jsonify({"ok": True, "response": answer[:200]})
+    except Exception as exc:
+        return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 400
+
+
+@app.route("/api/packs", methods=["POST"])
+@auth.login_required
+def api_create_pack():
+    auth.verify_csrf()
+    data = request.get_json(silent=True) or {}
+    kind = data.get("track", "academic")
+    if kind not in ("academic", "industry") or not data.get("opportunity_id"):
+        return jsonify({"error": "Invalid application pack request."}), 400
+    if not providers.get_config(g.user["id"]):
+        return jsonify({"error": "Configure and test an AI provider first.",
+                        "settings_url": url_for("settings_page")}), 400
+    pack_id = start_pack(g.user["id"], data["opportunity_id"], kind,
+                         data.get("documents") or [])
+    return jsonify({"ok": True, "id": pack_id, "status": "working"}), 202
+
+
+@app.route("/api/packs/<pack_id>")
+@auth.login_required
+def api_pack_status(pack_id):
+    pack = get_pack(g.user["id"], pack_id)
+    return (jsonify(pack) if pack else (jsonify({"error": "not found"}), 404))
+
+
+@app.route("/api/packs/<pack_id>/download")
+@auth.login_required
+def download_pack(pack_id):
+    pack = get_pack(g.user["id"], pack_id, include_blob=True)
+    if not pack or pack["status"] != "ready" or not pack.get("zip_blob"):
+        return jsonify({"error": "Application pack is not ready."}), 404
+    return send_file(io.BytesIO(base64.b64decode(pack["zip_blob"])),
+                     mimetype="application/zip", as_attachment=True,
+                     download_name=f"application-pack-{pack_id[:8]}.zip")
 
 
 # ---------------------------------------------------------------------------

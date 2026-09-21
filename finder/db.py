@@ -60,10 +60,81 @@ CREATE TABLE IF NOT EXISTS opportunities (
     first_seen    TEXT,
     last_seen     TEXT,
     status        TEXT DEFAULT 'new'
+    ,career_track TEXT DEFAULT 'academic'
 );
 CREATE INDEX IF NOT EXISTS idx_score  ON opportunities(score DESC);
 CREATE INDEX IF NOT EXISTS idx_seen   ON opportunities(first_seen DESC);
 CREATE INDEX IF NOT EXISTS idx_status ON opportunities(status);
+"""
+
+_PRODUCT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id            TEXT PRIMARY KEY,
+    email         TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    name          TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    last_login    TEXT,
+    is_active     INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS user_profiles (
+    id            TEXT PRIMARY KEY,
+    user_id       TEXT NOT NULL,
+    kind          TEXT NOT NULL,
+    cv_filename   TEXT,
+    cv_mime       TEXT,
+    cv_sha256     TEXT,
+    cv_blob       TEXT,
+    cv_text       TEXT,
+    profile_json  TEXT,
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    UNIQUE(user_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_profiles_user ON user_profiles(user_id);
+
+CREATE TABLE IF NOT EXISTS user_matches (
+    user_id       TEXT NOT NULL,
+    opportunity_id TEXT NOT NULL,
+    profile_kind  TEXT NOT NULL,
+    score         INTEGER NOT NULL,
+    matched_terms TEXT,
+    breakdown     TEXT,
+    status        TEXT DEFAULT 'new',
+    updated_at    TEXT NOT NULL,
+    PRIMARY KEY(user_id, opportunity_id, profile_kind)
+);
+CREATE INDEX IF NOT EXISTS idx_matches_user_score
+    ON user_matches(user_id, profile_kind, score DESC);
+
+CREATE TABLE IF NOT EXISTS provider_configs (
+    id                  TEXT PRIMARY KEY,
+    user_id             TEXT NOT NULL UNIQUE,
+    ai_provider         TEXT,
+    ai_model            TEXT,
+    ai_base_url         TEXT,
+    ai_key_enc          TEXT,
+    search_provider     TEXT,
+    search_key_enc      TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS application_packs (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL,
+    opportunity_id  TEXT NOT NULL,
+    profile_kind    TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    documents_json  TEXT,
+    sources_json    TEXT,
+    zip_blob        TEXT,
+    error           TEXT,
+    created_at      TEXT NOT NULL,
+    completed_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_packs_user ON application_packs(user_id, created_at);
 """
 
 _REFRESHES_SQLITE = """
@@ -94,7 +165,9 @@ CREATE TABLE IF NOT EXISTS refreshes (
 
 
 def schema() -> str:
-    return _OPPORTUNITIES + (_REFRESHES_POSTGRES if IS_POSTGRES else _REFRESHES_SQLITE)
+    return (_OPPORTUNITIES +
+            (_REFRESHES_POSTGRES if IS_POSTGRES else _REFRESHES_SQLITE) +
+            _PRODUCT_SCHEMA)
 
 
 # ---------------------------------------------------------------------------

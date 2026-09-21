@@ -21,3 +21,7 @@ services:
         value: "10"
       - key: DATABASE_URL
         sync: false            # set this in the dashboard, not in the repo
+      - key: SECRET_KEY
+        generateValue: true
+      - key: API_ENCRYPTION_KEY
+        generateValue: true

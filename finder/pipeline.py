@@ -12,6 +12,7 @@ from .config import LIMITS, SOURCES_ENABLED
 from .enrich import enrich
 from .scoring import score_opportunity
 from .sources import REGISTRY
+from . import industry
 
 # Progress shared with the web UI.
 STATE = {
@@ -139,6 +140,18 @@ def run_refresh(enrich_details: bool = True) -> dict:
             everything.extend(fresh)
             _log("  -> %d postings (%d new)" % (len(fresh), added))
 
+        STATE["stage"] = "searching industry jobs"
+        _log("[Industry jobs]")
+        try:
+            industry_items = industry.fetch(_log)
+            added, updated = _save(industry_items)
+            STATE["added"] += added
+            STATE["updated"] += updated
+            STATE["found"] += len(industry_items)
+            _log("  -> %d industry postings (%d new)" % (len(industry_items), added))
+        except Exception as exc:
+            _log("  !! Industry sources failed: %s" % exc)
+
         if enrich_details:
             STATE["stage"] = "reading adverts for deadlines"
             already = _enriched_ids()
@@ -169,6 +182,12 @@ def run_refresh(enrich_details: bool = True) -> dict:
                 _save(batch)
 
         STATE["stage"] = "finishing"
+        try:
+            from .matching import rebuild_all_matches
+            matched = rebuild_all_matches()
+            _log("Updated %d private user matches" % matched)
+        except Exception as exc:
+            _log("  !! User match refresh failed: %s" % exc)
         conn = store.connect()
         try:
             store.recompute_days_left(conn)

@@ -91,7 +91,10 @@ something fails.
    the repo and fills in the settings itself.
 4. It will ask for the value of **DATABASE_URL**, because the blueprint
    deliberately leaves it blank. Paste the Neon connection string here.
-5. Click **Apply** / **Create**.
+5. Confirm that Render generated **SECRET_KEY** and **API_ENCRYPTION_KEY**.
+   These must remain stable: changing the first signs users out and changing
+   the second makes previously stored provider credentials unreadable.
+6. Click **Apply** / **Create**.
 
 The first build takes about five minutes. When it finishes, Render shows your
 URL at the top of the service page. That link is the answer to the original

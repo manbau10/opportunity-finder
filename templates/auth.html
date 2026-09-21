@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ 'Create account' if mode == 'register' else 'Sign in' }} | Opportunity Finder</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="auth-page">
+<main class="auth-card">
+  <div class="mark">OF</div>
+  <h1>{{ 'Create your account' if mode == 'register' else 'Welcome back' }}</h1>
+  <p>Your CVs, matches, provider keys and application packs remain private to your account.</p>
+  {% for category, message in get_flashed_messages(with_categories=true) %}
+    <div class="form-message {{ category }}">{{ message }}</div>
+  {% endfor %}
+  <form method="post" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf }}">
+    {% if mode == 'register' %}
+    <label>Full name<input name="name" required minlength="2" autocomplete="name"></label>
+    {% endif %}
+    <label>Email address<input type="email" name="email" required autocomplete="email"></label>
+    <label>Password<input type="password" name="password" required minlength="10"
+      autocomplete="{{ 'new-password' if mode == 'register' else 'current-password' }}"></label>
+    <button class="btn primary wide" type="submit">{{ 'Create account' if mode == 'register' else 'Sign in' }}</button>
+  </form>
+  <p class="auth-switch">
+    {% if mode == 'register' %}Already registered? <a href="{{ url_for('login') }}">Sign in</a>
+    {% else %}New here? <a href="{{ url_for('register') }}">Create an account</a>{% endif %}
+  </p>
+</main>
+</body>
+</html>

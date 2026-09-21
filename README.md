@@ -1,5 +1,10 @@
 # Opportunity Finder
 
+Opportunity Finder is now a multi-user, CV-personalized product. Every account
+has separate Academic and Industry profiles, private scores and application
+tracking, encrypted bring-your-own AI/search settings, and downloadable Word
+application packs with a research-source audit trail.
+
 A daily dashboard of academic posts — faculty, fellowships and postdocs — gathered
 from four job boards plus a curated fellowship register, and scored against
 Ridwan A. Taiwo's CV.
@@ -14,6 +19,27 @@ at 07:00 Hong Kong time, whether or not your laptop is on.
 
 **On this PC** — the rest of this file. Same app, running locally against a
 SQLite file, with a 07:00 scheduled refresh.
+
+## First use online
+
+1. Create an account and sign in.
+2. Open **CVs** and upload an academic CV, an industry CV, or both. PDF, DOCX,
+   TXT and Markdown files up to 6 MB are accepted.
+3. Use the **Academic jobs** and **Industry jobs** tabs. Match scores, saved
+   jobs, applied jobs and hidden jobs belong only to the signed-in user.
+4. Open **API settings** and add an AI provider. Search can use key-free
+   DuckDuckGo or Tavily, Brave Search or Serper with the user's own key.
+5. Open a job and choose **Create Word application pack**. The ZIP contains
+   editable drafts, the job snapshot, the research sources and a manifest.
+
+Supported AI interfaces include OpenAI, Anthropic, Google Gemini, OpenRouter,
+Groq, Mistral, HTTPS OpenAI-compatible APIs and local Ollama/LM Studio when the
+application itself is running on the same computer. Provider credentials are
+encrypted before they are stored and are never returned to the browser.
+
+See [COMMERCIALIZATION_PLAN.md](COMMERCIALIZATION_PLAN.md) for the implemented
+MVP boundary and the remaining billing, email-verification, queue, storage,
+licensing and compliance work required before accepting paying customers.
 
 ---
 
