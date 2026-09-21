@@ -12,7 +12,7 @@ from .auth import now
 from .profiles import get_profile
 from .domains import DOMAIN_LABELS, job_domain_evidence
 
-MATCHER_VERSION = 2
+MATCHER_VERSION = 3
 
 
 def _terms(text: str) -> set[str]:
@@ -37,7 +37,15 @@ def score_for_profile(opportunity: dict, profile: dict) -> tuple[int, list[str],
     topic = min(1.0, 0.65 * phrase_score + 0.35 * min(1.0, overlap * 5))
     titles = [t.lower() for t in structured.get("target_titles") or []]
     role = 1.0 if any(t in (opportunity.get("title") or "").lower() for t in titles) else 0.58
-    country = 1.0 if opportunity.get("country_tier") == "target" else 0.72
+    preferred_locations = [str(x).lower() for x in structured.get("preferred_locations") or []]
+    if preferred_locations:
+        location_blob = " ".join(str(opportunity.get(k) or "") for k in
+                                 ("country", "location")).lower()
+        country = 1.0 if any(place in location_blob for place in preferred_locations) else 0.55
+    else:
+        # No preference means worldwide, rather than inheriting one founder's
+        # country list as a hidden product assumption.
+        country = 0.88
     days = opportunity.get("days_left")
     timing = 0.9 if days is None or days >= 14 else (0.7 if days >= 4 else 0.4)
     profile_domain = structured.get("primary_domain") or "general"

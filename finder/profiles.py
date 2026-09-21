@@ -36,6 +36,28 @@ PHRASES = [
     "programme management", "cost management", "health and safety", "procurement",
 ]
 
+TITLE_WORDS = re.compile(
+    r"\b(?:manager|engineer|nurse|analyst|specialist|officer|coordinator|consultant|"
+    r"developer|designer|technician|accountant|auditor|teacher|lecturer|professor|"
+    r"therapist|pharmacist|surveyor|architect|administrator|director|supervisor|"
+    r"scientist|researcher|planner|advisor|assistant|practitioner|midwife)\b", re.I)
+
+
+def _infer_job_titles(text: str) -> list[str]:
+    """Extract plausible role lines as a universal fallback for unknown fields."""
+    titles = []
+    for raw in text.splitlines():
+        line = " ".join(raw.strip(" -|•\t").split())
+        words = line.split()
+        if not (2 <= len(words) <= 10 and len(line) <= 100 and TITLE_WORDS.search(line)):
+            continue
+        if re.search(r"\b(?:responsibilit|experience|education|profile|summary|skills)\b", line, re.I):
+            continue
+        clean = re.sub(r"\s*[|–—]\s*.*$", "", line).strip()
+        if clean and clean.lower() not in {x.lower() for x in titles}:
+            titles.append(clean)
+    return titles[:8]
+
 
 def _extension(filename: str) -> str:
     return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
@@ -84,7 +106,8 @@ def build_profile(text: str, kind: str) -> dict:
     degree = "PhD" if re.search(r"\b(ph\.?d|doctor of philosophy)\b", lower) else (
         "Master's" if re.search(r"\b(m\.?sc|m\.?eng|master)\b", lower) else "")
     domain = primary_domain(text)
-    subject_titles = TARGET_TITLES.get(domain, [])
+    inferred_titles = _infer_job_titles(text)
+    subject_titles = list(dict.fromkeys(TARGET_TITLES.get(domain, []) + inferred_titles))
     target_titles = (
         ["assistant professor", "lecturer", "research fellow", "postdoctoral fellow"]
         if kind == "academic" else subject_titles
@@ -93,6 +116,7 @@ def build_profile(text: str, kind: str) -> dict:
         "kind": kind,
         "keywords": list(dict.fromkeys(keywords))[:55],
         "target_titles": target_titles,
+        "preferred_locations": [],
         "primary_domain": domain,
         "domain_label": DOMAIN_LABELS.get(domain, "General / multidisciplinary"),
         "domains": ranked_domains(text)[:5],
@@ -173,3 +197,39 @@ def get_profile(user_id: str, kind: str, include_text: bool = False) -> dict | N
 
 def profile_summaries(user_id: str) -> dict:
     return {kind: get_profile(user_id, kind) for kind in ("academic", "industry")}
+
+
+def update_preferences(user_id: str, kind: str, data: dict) -> dict:
+    if kind not in ("academic", "industry"):
+        raise ValueError("Unknown CV type.")
+    current = get_profile(user_id, kind, include_text=True)
+    if not current:
+        raise ValueError("Upload this CV before setting job preferences.")
+
+    def clean_list(value, maximum: int) -> list[str]:
+        raw = value if isinstance(value, list) else re.split(r"[,;\n]", str(value or ""))
+        cleaned = []
+        for entry in raw:
+            item = " ".join(str(entry).split()).strip()[:100]
+            if item and item.lower() not in {x.lower() for x in cleaned}:
+                cleaned.append(item)
+        return cleaned[:maximum]
+
+    target_titles = clean_list(data.get("target_titles"), 12)
+    if not target_titles:
+        raise ValueError("Enter at least one target job title.")
+    preferred_locations = clean_list(data.get("preferred_locations"), 12)
+    profile = current["profile"]
+    profile["target_titles"] = target_titles
+    profile["preferred_locations"] = preferred_locations
+    stamp = now()
+    conn = store.connect()
+    try:
+        conn.execute(
+            "UPDATE user_profiles SET profile_json=?,updated_at=? WHERE id=? AND user_id=?",
+            (json.dumps(profile), stamp, current["id"], user_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"profile": profile, "updated_at": stamp}

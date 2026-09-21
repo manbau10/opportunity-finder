@@ -420,6 +420,19 @@ def api_upload_profile(kind):
         return jsonify({"error": str(exc)}), 400
 
 
+@app.route("/api/profiles/<kind>/preferences", methods=["POST"])
+@auth.login_required
+def api_profile_preferences(kind):
+    auth.verify_csrf()
+    try:
+        result = profiles.update_preferences(
+            g.user["id"], kind, request.get_json(silent=True) or {})
+        result["matched"] = matching.rebuild_matches(g.user["id"], kind)
+        return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 @app.route("/api/providers")
 @auth.login_required
 def api_provider_config():

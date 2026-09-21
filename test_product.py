@@ -17,6 +17,7 @@ from finder import pipeline, store
 from finder import application_pack
 from finder.matching import score_for_profile
 from finder.profiles import build_profile
+from finder.industry import _direct_job_result, _parse_nhs_xml
 
 EMAILS = ("product-test-one@example.invalid", "product-test-two@example.invalid")
 OPP_IDS = ("__product_academic__", "__product_industry__")
@@ -110,6 +111,40 @@ class ProductFlowTest(unittest.TestCase):
         from finder.providers import public_catalog
         self.assertEqual(public_catalog()["search"][0], "duckduckgo")
 
+    def test_official_nhs_nursing_feed_is_normalized(self):
+        payload = b"""<nhsJobs><vacancyDetails><closeDate>2026-10-20</closeDate>
+        <description>Lead a theatre team and provide safe patient services.</description>
+        <employer>Example NHS Trust</employer><id>123</id><locations>
+        <locations>Manchester, M1 1AA</locations></locations>
+        <postDate>2026-09-21T08:00:00</postDate><title>Theatre Team Leader</title>
+        <url>https://www.jobs.nhs.uk/candidate/jobadvert/123</url></vacancyDetails></nhsJobs>"""
+        rows = _parse_nhs_xml(payload)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["source_key"], "nhs_jobs")
+        self.assertEqual(rows[0]["country"], "United Kingdom")
+        self.assertEqual(rows[0]["deadline"], "2026-10-20")
+        self.assertIn("nursing", rows[0]["description"].lower())
+
+    def test_direct_employer_job_search_discards_landing_pages(self):
+        direct = _direct_job_result({
+            "title": "Next Health - Registered Nurse - Los Angeles - Lever",
+            "url": "https://jobs.lever.co/next-health/2d9420fe-3b3e-4ba9-b4a8-1621bf8527fa/apply",
+            "snippet": "Registered Nurse position in Los Angeles.",
+        }, "nursing", "registered nurse")
+        self.assertIsNotNone(direct)
+        self.assertEqual(direct["source_key"], "web_lever")
+        self.assertFalse(direct["url"].endswith("/apply"))
+        landing = _direct_job_result({
+            "title": "Nursing jobs", "url": "https://jobs.lever.co/next-health",
+            "snippet": ""}, "nursing", "registered nurse")
+        self.assertIsNone(landing)
+
+    def test_unknown_profession_still_gets_search_titles(self):
+        cv = ("PROFESSIONAL EXPERIENCE\nCybersecurity Consultant\n"
+              "Protected enterprise networks and conducted security reviews.\n" * 8)
+        profile = build_profile(cv, "industry")
+        self.assertIn("Cybersecurity Consultant", profile["target_titles"])
+
     def test_end_to_end_account_isolation(self):
         one, csrf_one, uid_one = self._register(EMAILS[0])
         two, csrf_two, uid_two = self._register(EMAILS[1])
@@ -119,6 +154,14 @@ class ProductFlowTest(unittest.TestCase):
         self._upload(one, csrf_one, "academic", cv_one)
         self._upload(one, csrf_one, "industry", cv_one)
         self._upload(two, csrf_two, "academic", cv_two)
+
+        preferences = one.post("/api/profiles/industry/preferences", json={
+            "target_titles": "Infrastructure Project Manager, Civil Engineer",
+            "preferred_locations": "Canada, Australia",
+        }, headers={"X-CSRF-Token": csrf_one})
+        self.assertEqual(preferences.status_code, 200, preferences.get_data(as_text=True))
+        self.assertEqual(preferences.get_json()["profile"]["preferred_locations"],
+                         ["Canada", "Australia"])
 
         self.assertEqual(one.get("/profile").status_code, 200)
         self.assertEqual(one.get("/settings").status_code, 200)

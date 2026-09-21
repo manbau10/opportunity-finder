@@ -18,6 +18,17 @@
       {% if p %}<p><strong>{{ p.cv_filename }}</strong></p>
       <p class="tiny">{{ (p.profile.keywords or [])[:12] | join(' · ') }}</p>
       <p class="tiny muted">Last updated {{ p.updated_at[:16] | replace('T',' ') }}</p>
+      <form class="preference-form stack-form" data-kind="{{ kind }}">
+        <label>Target job titles
+          <textarea name="target_titles" rows="3" required>{{ (p.profile.target_titles or []) | join(', ') }}</textarea>
+          <span class="field-help">Check these after uploading. Add any titles the CV reader missed, separated by commas.</span>
+        </label>
+        <label>Preferred countries or locations
+          <input name="preferred_locations" value="{{ (p.profile.preferred_locations or []) | join(', ') }}" placeholder="Leave blank to search worldwide">
+        </label>
+        <button class="btn" type="submit">Save search preferences</button>
+        <span class="form-status" aria-live="polite"></span>
+      </form>
       {% else %}<p class="muted">Not uploaded yet.</p>{% endif %}
       <form class="upload-form" data-kind="{{ kind }}">
         <input type="file" name="cv" accept=".pdf,.docx,.txt,.md" required>
@@ -38,6 +49,15 @@ document.querySelectorAll('.upload-form').forEach(form => form.addEventListener(
   if(!response.ok){status.textContent=data.error||'Upload failed';status.className='form-status error';return;}
   status.textContent=`Ready — ${data.matched} opportunities scored`; status.className='form-status success';
   setTimeout(()=>location.reload(),900);
+}));
+document.querySelectorAll('.preference-form').forEach(form => form.addEventListener('submit', async e => {
+  e.preventDefault(); const status=form.querySelector('.form-status'); const button=form.querySelector('button');
+  status.textContent='Saving and rescoring…'; button.disabled=true;
+  const body=Object.fromEntries(new FormData(form));
+  const response=await fetch('/api/profiles/'+form.dataset.kind+'/preferences',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':APP.csrf},body:JSON.stringify(body)});
+  const data=await response.json(); button.disabled=false;
+  status.textContent=response.ok?`Saved — ${data.matched} opportunities rescored`:(data.error||'Could not save');
+  status.className='form-status '+(response.ok?'success':'error');
 }));
 </script>
 </body></html>
