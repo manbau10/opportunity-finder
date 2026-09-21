@@ -28,6 +28,7 @@ AI_PRESETS = {
     "custom": ("", ""),
 }
 SEARCH_PROVIDERS = {"duckduckgo", "tavily", "brave", "serper"}
+SEARCH_PROVIDER_ORDER = ["duckduckgo", "tavily", "brave", "serper"]
 AI_LABELS = {
     "poe": "Poe (easy setup)", "openai": "OpenAI",
     "anthropic": "Anthropic Claude", "gemini": "Google Gemini",
@@ -89,7 +90,10 @@ def save_config(user_id: str, data: dict) -> dict:
         if provider not in {"ollama", "lmstudio"} and not ai_key:
             raise ValueError("Enter the API key supplied by your AI provider.")
         if search != "duckduckgo" and not search_key:
-            raise ValueError("Enter the API key supplied by your search provider.")
+            raise ValueError(
+                f"{search.title()} Search requires a separate search API key. "
+                "Choose DuckDuckGo for web research without a search key."
+            )
         stamp = now()
         if old:
             config_id, created = old["id"], old["created_at"]
@@ -183,5 +187,5 @@ def public_catalog() -> dict:
     return {
         "ai": [{"key": k, "label": AI_LABELS[k], "default_url": v[0],
                 "default_model": v[1]} for k, v in AI_PRESETS.items()],
-        "search": sorted(SEARCH_PROVIDERS),
+        "search": SEARCH_PROVIDER_ORDER,
     }

@@ -106,6 +106,10 @@ class ProductFlowTest(unittest.TestCase):
         self.assertLessEqual(data_score, 18)
         self.assertLessEqual(care_score, 18)
 
+    def test_free_search_provider_is_the_default(self):
+        from finder.providers import public_catalog
+        self.assertEqual(public_catalog()["search"][0], "duckduckgo")
+
     def test_end_to_end_account_isolation(self):
         one, csrf_one, uid_one = self._register(EMAILS[0])
         two, csrf_two, uid_two = self._register(EMAILS[1])

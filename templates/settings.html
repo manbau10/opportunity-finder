@@ -24,10 +24,11 @@
   <details class="span-2 advanced"><summary>Advanced connection details</summary>
     <label>API endpoint<input type="url" name="ai_base_url" value="{{ config.ai_base_url if config else catalog.ai[0].default_url }}" placeholder="https://…" required></label>
   </details>
-  <label>Search provider<select name="search_provider">
-    {% for item in catalog.search %}<option value="{{ item }}" {{ 'selected' if config and config.search_provider == item else '' }}>{{ item | title }}</option>{% endfor %}
+  <label>Search provider<select name="search_provider" id="searchProvider">
+    {% for item in catalog.search %}<option value="{{ item }}" {{ 'selected' if config and config.search_provider == item else '' }}>{{ 'DuckDuckGo (no key required)' if item == 'duckduckgo' else item | title }}</option>{% endfor %}
   </select></label>
-  <label>Search API key<input type="password" name="search_key" autocomplete="off" placeholder="Optional for DuckDuckGo"></label>
+  <label id="searchKeyField">Search API key<input type="password" name="search_key" autocomplete="new-password" placeholder="Paste the separate search API key">
+    <span class="field-help">This is different from your AI key.</span></label>
   </div>
   <div class="form-actions"><button class="btn" type="submit">Save securely</button>
     <button class="btn primary" type="button" id="saveTestProvider">Save and test</button>
@@ -42,9 +43,11 @@
 <script>
 const form=document.querySelector('#providerForm'),status=document.querySelector('#providerStatus');
 const presets=Object.fromEntries(APP.catalog.ai.map(x=>[x.key,x]));
-const provider=document.querySelector('#aiProvider'),guide=document.querySelector('#poeGuide');
+const provider=document.querySelector('#aiProvider'),guide=document.querySelector('#poeGuide'),searchProvider=document.querySelector('#searchProvider'),searchKeyField=document.querySelector('#searchKeyField');
 function showGuide(){guide.hidden=provider.value!=='poe';}
+function showSearchKey(){const free=searchProvider.value==='duckduckgo';searchKeyField.hidden=free;searchKeyField.querySelector('input').disabled=free;}
 provider.addEventListener('change',e=>{const p=presets[e.target.value];form.ai_model.value=p.default_model;form.ai_base_url.value=p.default_url;showGuide();});showGuide();
+searchProvider.addEventListener('change',showSearchKey);showSearchKey();
 async function save(testAfter=false){status.textContent=testAfter?'Saving securely…':'Saving…';status.className='form-status';const body=Object.fromEntries(new FormData(form));
 const r=await fetch('/api/providers',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':APP.csrf},body:JSON.stringify(body)});const d=await r.json();if(!r.ok){status.textContent=d.error||'Save failed';status.className='form-status error';return false;}
 if(!testAfter){status.textContent='Settings saved securely';status.className='form-status success';return true;}
