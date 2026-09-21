@@ -4,27 +4,37 @@
 <body><header class="topbar"><div class="brand"><div class="mark">OF</div><div><h1>AI and search settings</h1>
 <p class="sub">Bring your own provider and keep control of usage costs</p></div></div>
 <div class="topbar-right"><a class="btn" href="/">Back to opportunities</a></div></header>
-<main class="settings-shell"><div class="page-intro"><h2>Provider configuration</h2>
-<p>Keys are encrypted before storage and are never returned to your browser. Free and paid providers can use the same application-pack workflow.</p></div>
+<main class="settings-shell"><div class="page-intro"><h2>Connect your AI key</h2>
+<p>You do not need to understand APIs. Choose where your key came from, paste it once, then use <b>Save and test</b>. Keys are encrypted before storage and are never returned to your browser.</p></div>
+<section class="settings-card provider-guide" id="poeGuide">
+  <div class="eyebrow">Recommended for your Poe key</div><h2>Set up Poe in three steps</h2>
+  <ol><li>Select <b>Poe</b> below.</li><li>Paste the key from <a href="https://poe.com/api/keys" target="_blank" rel="noopener">Poe API keys</a>. Do not paste your Poe password.</li><li>Press <b>Save and test</b>. The endpoint and recommended model are filled automatically.</li></ol>
+  <p class="tiny muted">Poe uses your Poe points for API requests. Use an official Poe bot and check your points before generating a large application pack.</p>
+</section>
 <form id="providerForm" class="settings-card stack-form">
   <div class="form-grid">
   <label>AI provider<select name="ai_provider" id="aiProvider">
-    {% for item in catalog.ai %}<option value="{{ item.key }}" {{ 'selected' if config and config.ai_provider == item.key else '' }}>{{ item.key | title }}</option>{% endfor %}
+    {% for item in catalog.ai %}<option value="{{ item.key }}" {{ 'selected' if config and config.ai_provider == item.key else '' }}>{{ item.label }}</option>{% endfor %}
   </select></label>
-  <label>Model<input name="ai_model" value="{{ config.ai_model if config else catalog.ai[0].default_model }}" placeholder="Provider model name" required></label>
-  <label class="span-2">API endpoint<input type="url" name="ai_base_url" value="{{ config.ai_base_url if config else catalog.ai[0].default_url }}" placeholder="https://…" required></label>
-  <label class="span-2">AI API key<input type="password" name="ai_key" autocomplete="off" placeholder="{{ 'Saved — leave blank to keep it' if config and config.has_ai_key else 'Paste provider key' }}"></label>
+  <label>AI model<input name="ai_model" list="poeModels" value="{{ config.ai_model if config else catalog.ai[0].default_model }}" placeholder="Provider model name" required>
+    <span class="field-help" id="modelHelp">For Poe, the recommended model is already selected.</span></label>
+  <datalist id="poeModels"><option value="Claude-Sonnet-4.6"><option value="Claude-Opus-4.7"><option value="Gemini-3.1-Pro"><option value="GPT-5.4"></datalist>
+  <label class="span-2">AI API key<input type="password" name="ai_key" autocomplete="new-password" spellcheck="false" placeholder="{{ 'A key is saved — leave blank to keep it' if config and config.has_ai_key else 'Paste the API key here' }}">
+    <span class="field-help">Your key is encrypted. It is never displayed again and is not included in downloaded files.</span></label>
+  <details class="span-2 advanced"><summary>Advanced connection details</summary>
+    <label>API endpoint<input type="url" name="ai_base_url" value="{{ config.ai_base_url if config else catalog.ai[0].default_url }}" placeholder="https://…" required></label>
+  </details>
   <label>Search provider<select name="search_provider">
     {% for item in catalog.search %}<option value="{{ item }}" {{ 'selected' if config and config.search_provider == item else '' }}>{{ item | title }}</option>{% endfor %}
   </select></label>
   <label>Search API key<input type="password" name="search_key" autocomplete="off" placeholder="Optional for DuckDuckGo"></label>
   </div>
-  <div class="form-actions"><button class="btn primary" type="submit">Save securely</button>
-    <button class="btn" type="button" id="testProvider">Test AI connection</button>
+  <div class="form-actions"><button class="btn" type="submit">Save securely</button>
+    <button class="btn primary" type="button" id="saveTestProvider">Save and test</button>
     <span id="providerStatus" class="form-status" aria-live="polite"></span></div>
 </form>
 <section class="settings-card"><h2>Supported providers</h2>
-<p class="tiny">AI: OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, Mistral, Ollama, LM Studio and HTTPS OpenAI-compatible endpoints.</p>
+<p class="tiny">AI: Poe, OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, Mistral, Ollama, LM Studio and HTTPS OpenAI-compatible endpoints.</p>
 <p class="tiny">Search: DuckDuckGo without a key, or Tavily, Brave Search and Serper with your key.</p>
 <p class="tiny muted">Local Ollama and LM Studio endpoints work only when this application runs on the same computer and ALLOW_LOCAL_AI=true. A hosted Render service cannot connect to an API running on your laptop.</p></section>
 </main>
@@ -32,8 +42,13 @@
 <script>
 const form=document.querySelector('#providerForm'),status=document.querySelector('#providerStatus');
 const presets=Object.fromEntries(APP.catalog.ai.map(x=>[x.key,x]));
-document.querySelector('#aiProvider').addEventListener('change',e=>{const p=presets[e.target.value];form.ai_model.value=p.default_model;form.ai_base_url.value=p.default_url;});
-form.addEventListener('submit',async e=>{e.preventDefault();status.textContent='Saving…';const body=Object.fromEntries(new FormData(form));
-const r=await fetch('/api/providers',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':APP.csrf},body:JSON.stringify(body)});const d=await r.json();status.textContent=r.ok?'Settings saved':(d.error||'Save failed');status.className='form-status '+(r.ok?'success':'error');});
-document.querySelector('#testProvider').onclick=async()=>{status.textContent='Testing…';const r=await fetch('/api/providers/test',{method:'POST',headers:{'X-CSRF-Token':APP.csrf}});const d=await r.json();status.textContent=r.ok?'Connection successful':(d.error||'Test failed');status.className='form-status '+(r.ok?'success':'error');};
+const provider=document.querySelector('#aiProvider'),guide=document.querySelector('#poeGuide');
+function showGuide(){guide.hidden=provider.value!=='poe';}
+provider.addEventListener('change',e=>{const p=presets[e.target.value];form.ai_model.value=p.default_model;form.ai_base_url.value=p.default_url;showGuide();});showGuide();
+async function save(testAfter=false){status.textContent=testAfter?'Saving securely…':'Saving…';status.className='form-status';const body=Object.fromEntries(new FormData(form));
+const r=await fetch('/api/providers',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':APP.csrf},body:JSON.stringify(body)});const d=await r.json();if(!r.ok){status.textContent=d.error||'Save failed';status.className='form-status error';return false;}
+if(!testAfter){status.textContent='Settings saved securely';status.className='form-status success';return true;}
+status.textContent='Saved. Testing the AI connection…';const tr=await fetch('/api/providers/test',{method:'POST',headers:{'X-CSRF-Token':APP.csrf}});const td=await tr.json();status.textContent=tr.ok?'Connection successful — you can now create application packs':(td.error||'The settings were saved, but the connection test failed');status.className='form-status '+(tr.ok?'success':'error');return tr.ok;}
+form.addEventListener('submit',e=>{e.preventDefault();save(false);});
+document.querySelector('#saveTestProvider').onclick=()=>save(true);
 </script></body></html>

@@ -218,10 +218,15 @@ def api_opportunities():
     kind = args.get("track", "academic")
     if kind not in ("academic", "industry"):
         return jsonify({"error": "unknown career track"}), 400
-    if not profiles.get_profile(g.user["id"], kind):
+    user_profile = profiles.get_profile(g.user["id"], kind)
+    if not user_profile:
         return jsonify({"items": [], "count": 0,
                         "facets": {"countries": [], "roles": [], "sources": []},
                         "summary": {}, "setup_required": True})
+    # Existing accounts are upgraded on their first visit after a matcher
+    # release, so users do not need to upload the CV again.
+    if not matching.matches_are_current(g.user["id"], kind):
+        matching.rebuild_matches(g.user["id"], kind)
     min_score = int(args.get("min_score", DISPLAY_MIN_SCORE))
     roles = [r for r in args.get("roles", "").split(",") if r]
     countries = [c for c in args.get("countries", "").split(",") if c]
@@ -319,8 +324,16 @@ def api_opportunities():
     finally:
         conn.close()
 
+    domain_label = (user_profile.get("profile") or {}).get("domain_label", "your field")
+    coverage_note = (
+        f"No reliable {domain_label} matches meet this score yet. The app now hides "
+        "jobs from other occupations instead of showing misleading keyword matches."
+        if not items else ""
+    )
     return jsonify({"items": items, "count": len(items),
-                    "facets": facets, "summary": summary})
+                    "facets": facets, "summary": summary,
+                    "profile_domain": (user_profile.get("profile") or {}).get("primary_domain"),
+                    "coverage_note": coverage_note})
 
 
 @app.route("/api/opportunity/<opp_id>")

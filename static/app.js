@@ -7,6 +7,7 @@ const state = {
 };
 const appConfig = window.APP || { track: 'academic', csrf: '', profileReady: false };
 let lastItems = [];
+let coverageNote = '';
 
 const $  = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
@@ -59,6 +60,7 @@ async function load() {
       ' CV to begin</h3><p><a class="btn primary" href="/profile">Upload CV</a></p>'; return;
   }
   lastItems = data.items;
+  coverageNote = data.coverage_note || '';
   renderStats(data.summary);
   renderFacets(data.facets);
   renderList(data.items);
@@ -182,8 +184,8 @@ function renderList(items) {
   $('#list').innerHTML = items.map(card).join('');
   $('#empty').hidden = items.length > 0;
   if (!items.length) {
-    $('#empty').innerHTML = `<h3>Nothing matches these filters</h3>
-      <p>Lower the minimum match, widen the deadline filter, or press <em>Refresh now</em>.</p>`;
+    $('#empty').innerHTML = `<h3>No reliable matches found</h3>
+      <p>${esc(coverageNote || 'Try widening the deadline filter or press Refresh now. Lowering the score may show weaker matches.')}</p>`;
   }
 
   $$('.card').forEach(el => {
@@ -235,6 +237,7 @@ async function openDrawer(id) {
 
     <h4>Why it scored ${it.score}</h4>
     <div class="bars">
+      ${bar('Career field fit', b.domain)}
       ${bar('Subject fit', b.topic)}
       ${bar('Post type fit', b.role)}
       ${bar('Location fit', b.country)}

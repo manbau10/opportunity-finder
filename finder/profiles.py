@@ -12,6 +12,7 @@ from collections import Counter
 
 from . import store
 from .auth import now
+from .domains import DOMAIN_LABELS, TARGET_TITLES, primary_domain, ranked_domains
 
 MAX_CV_BYTES = 6 * 1024 * 1024
 ALLOWED_EXTENSIONS = {"pdf", "docx", "txt", "md"}
@@ -82,16 +83,19 @@ def build_profile(text: str, kind: str) -> dict:
     phones = re.findall(r"(?:\+?\d[\d ()-]{7,}\d)", text)
     degree = "PhD" if re.search(r"\b(ph\.?d|doctor of philosophy)\b", lower) else (
         "Master's" if re.search(r"\b(m\.?sc|m\.?eng|master)\b", lower) else "")
+    domain = primary_domain(text)
+    subject_titles = TARGET_TITLES.get(domain, [])
     target_titles = (
         ["assistant professor", "lecturer", "research fellow", "postdoctoral fellow"]
-        if kind == "academic" else
-        ["project manager", "construction manager", "infrastructure manager",
-         "programme manager", "civil engineer", "asset manager"]
+        if kind == "academic" else subject_titles
     )
     return {
         "kind": kind,
         "keywords": list(dict.fromkeys(keywords))[:55],
         "target_titles": target_titles,
+        "primary_domain": domain,
+        "domain_label": DOMAIN_LABELS.get(domain, "General / multidisciplinary"),
+        "domains": ranked_domains(text)[:5],
         "degree": degree,
         "email": emails[0] if emails else "",
         "phone": phones[0].strip() if phones else "",
@@ -138,7 +142,9 @@ def save_profile(user_id: str, kind: str, filename: str, data: bytes) -> dict:
 
 
 def get_profile(user_id: str, kind: str, include_text: bool = False) -> dict | None:
-    fields = "*" if include_text else "id,user_id,kind,cv_filename,cv_mime,cv_sha256,profile_json,created_at,updated_at"
+    # Always fetch the extracted text so profiles created before occupational
+    # classification was introduced can be upgraded transparently.
+    fields = "id,user_id,kind,cv_filename,cv_mime,cv_sha256,cv_text,profile_json,created_at,updated_at"
     conn = store.connect()
     try:
         row = conn.execute(
@@ -151,9 +157,19 @@ def get_profile(user_id: str, kind: str, include_text: bool = False) -> dict | N
         return None
     result = dict(row)
     result["profile"] = json.loads(result.pop("profile_json") or "{}")
+    if not result["profile"].get("primary_domain"):
+        result["profile"] = build_profile(result.get("cv_text") or "", kind)
+        conn = store.connect()
+        try:
+            conn.execute("UPDATE user_profiles SET profile_json=?,updated_at=? WHERE id=? AND user_id=?",
+                         (json.dumps(result["profile"]), now(), result["id"], user_id))
+            conn.commit()
+        finally:
+            conn.close()
+    if not include_text:
+        result.pop("cv_text", None)
     return result
 
 
 def profile_summaries(user_id: str) -> dict:
     return {kind: get_profile(user_id, kind) for kind in ("academic", "industry")}
-

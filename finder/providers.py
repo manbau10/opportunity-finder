@@ -16,6 +16,7 @@ from . import store
 from .auth import now
 
 AI_PRESETS = {
+    "poe": ("https://api.poe.com/v1/chat/completions", "Claude-Sonnet-4.6"),
     "openai": ("https://api.openai.com/v1/chat/completions", "gpt-4.1-mini"),
     "anthropic": ("https://api.anthropic.com/v1/messages", "claude-3-5-haiku-latest"),
     "gemini": ("https://generativelanguage.googleapis.com/v1beta", "gemini-2.0-flash"),
@@ -27,6 +28,13 @@ AI_PRESETS = {
     "custom": ("", ""),
 }
 SEARCH_PROVIDERS = {"duckduckgo", "tavily", "brave", "serper"}
+AI_LABELS = {
+    "poe": "Poe (easy setup)", "openai": "OpenAI",
+    "anthropic": "Anthropic Claude", "gemini": "Google Gemini",
+    "openrouter": "OpenRouter", "groq": "Groq", "mistral": "Mistral",
+    "ollama": "Ollama (local)", "lmstudio": "LM Studio (local)",
+    "custom": "Other compatible API",
+}
 
 
 def _fernet() -> Fernet:
@@ -159,7 +167,7 @@ def chat(user_id: str, system: str, prompt: str, max_tokens: int = 5000) -> str:
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = f"Bearer {key}"
-    if provider == "openrouter":
+    if provider in {"openrouter", "poe"}:
         headers["HTTP-Referer"] = "https://opportunity-finder-uz4x.onrender.com"
         headers["X-Title"] = "Opportunity Finder"
     response = requests.post(url, timeout=timeout, headers=headers, json={
@@ -173,7 +181,7 @@ def chat(user_id: str, system: str, prompt: str, max_tokens: int = 5000) -> str:
 
 def public_catalog() -> dict:
     return {
-        "ai": [{"key": k, "default_url": v[0], "default_model": v[1]} for k, v in AI_PRESETS.items()],
+        "ai": [{"key": k, "label": AI_LABELS[k], "default_url": v[0],
+                "default_model": v[1]} for k, v in AI_PRESETS.items()],
         "search": sorted(SEARCH_PROVIDERS),
     }
-

@@ -15,6 +15,8 @@ os.environ.setdefault("SECRET_KEY", "integration-test-secret-not-for-production"
 from app import app
 from finder import pipeline, store
 from finder import application_pack
+from finder.matching import score_for_profile
+from finder.profiles import build_profile
 
 EMAILS = ("product-test-one@example.invalid", "product-test-two@example.invalid")
 OPP_IDS = ("__product_academic__", "__product_industry__")
@@ -86,6 +88,24 @@ class ProductFlowTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
         return response.get_json()
 
+    def test_occupational_domain_gate_blocks_incidental_health_words(self):
+        cv = ("Registered Nurse with BSc Nursing. Staff nurse in intensive care, "
+              "clinical nursing, medication administration and ward practice. " * 10)
+        structured = build_profile(cv, "industry")
+        self.assertEqual(structured["primary_domain"], "nursing")
+        profile = {"profile": structured, "cv_text": cv}
+        base = {"org": "Example", "department": "", "location": "London",
+                "country_tier": "target", "days_left": 30}
+        nurse_score = score_for_profile({**base, "title": "Registered Nurse - ICU",
+            "description": "Provide nursing care to patients in intensive care."}, profile)[0]
+        data_score = score_for_profile({**base, "title": "Data Analyst - Luxury Platform",
+            "description": "Analyse customer health and care data in dashboards."}, profile)[0]
+        care_score = score_for_profile({**base, "title": "Customer Care Manager",
+            "description": "Lead customer care and wellbeing services."}, profile)[0]
+        self.assertGreaterEqual(nurse_score, 70)
+        self.assertLessEqual(data_score, 18)
+        self.assertLessEqual(care_score, 18)
+
     def test_end_to_end_account_isolation(self):
         one, csrf_one, uid_one = self._register(EMAILS[0])
         two, csrf_two, uid_two = self._register(EMAILS[1])
@@ -126,8 +146,8 @@ class ProductFlowTest(unittest.TestCase):
         self.assertEqual(other_view["status"], "new")
 
         config = one.post("/api/providers", json={
-            "ai_provider": "openai", "ai_model": "gpt-test",
-            "ai_base_url": "https://api.openai.com/v1/chat/completions",
+            "ai_provider": "poe", "ai_model": "Claude-Sonnet-4.6",
+            "ai_base_url": "https://api.poe.com/v1/chat/completions",
             "ai_key": "plaintext-test-key-must-not-remain",
             "search_provider": "duckduckgo", "search_key": "",
         }, headers={"X-CSRF-Token": csrf_one})

@@ -10,6 +10,9 @@ import re
 from . import store
 from .auth import now
 from .profiles import get_profile
+from .domains import DOMAIN_LABELS, job_domain_evidence
+
+MATCHER_VERSION = 2
 
 
 def _terms(text: str) -> set[str]:
@@ -25,7 +28,7 @@ def score_for_profile(opportunity: dict, profile: dict) -> tuple[int, list[str],
                         ("title", "org", "department", "description", "location")).lower()
     cv_words = _terms(cv_text)
     job_words = _terms(job_blob)
-    phrase_hits = [k for k in keywords if str(k).lower() in job_blob]
+    phrase_hits = [k for k in keywords if len(str(k)) > 4 and str(k).lower() in job_blob]
     word_hits = sorted(cv_words & job_words, key=lambda w: (-len(w), w))
     matched = list(dict.fromkeys(phrase_hits + word_hits))[:16]
 
@@ -37,13 +40,67 @@ def score_for_profile(opportunity: dict, profile: dict) -> tuple[int, list[str],
     country = 1.0 if opportunity.get("country_tier") == "target" else 0.72
     days = opportunity.get("days_left")
     timing = 0.9 if days is None or days >= 14 else (0.7 if days >= 4 else 0.4)
-    score = round(100 * (0.55 * topic + 0.22 * role + 0.13 * country + 0.10 * timing))
+    profile_domain = structured.get("primary_domain") or "general"
+    title_domains, body_domains = job_domain_evidence(
+        opportunity.get("title") or "", opportunity.get("description") or "")
+    title_best = max(title_domains, key=title_domains.get) if title_domains else ""
+    body_best = max(body_domains, key=body_domains.get) if body_domains else ""
+
+    if profile_domain == "general":
+        domain_fit, domain_match, cap = 0.62, "uncertain", 100
+    elif profile_domain in title_domains:
+        domain_fit, domain_match, cap = 1.0, "strong", 100
+    elif title_best and title_best != "education":
+        # An explicit conflicting occupation in the title is decisive. Advert
+        # boilerplate and shared soft skills cannot overcome this gate.
+        domain_fit, domain_match, cap = 0.05, "conflict", 18
+    elif profile_domain in body_domains:
+        domain_fit, domain_match, cap = 0.78, "probable", 100
+    elif body_best and body_best not in {"education", "project_management"}:
+        domain_fit, domain_match, cap = 0.12, "conflict", 24
+    else:
+        domain_fit, domain_match, cap = 0.35, "uncertain", 42
+
+    # Nursing requires an explicit nursing occupation, not merely healthcare,
+    # care, clinical or wellbeing language in another job advertisement.
+    if profile_domain == "nursing" and "nursing" not in title_domains:
+        if "nursing" in body_domains and not title_best:
+            domain_fit, domain_match, cap = 0.68, "probable", 58
+        else:
+            domain_fit, domain_match, cap = 0.02, "conflict", 12
+
+    score = round(100 * (0.38 * domain_fit + 0.34 * topic + 0.13 * role
+                         + 0.08 * country + 0.07 * timing))
+    score = min(score, cap)
     if not matched:
         score = min(score, 28)
     return max(0, min(100, score)), matched, {
+        "matcher_version": MATCHER_VERSION,
+        "domain": round(domain_fit * 100), "domain_match": domain_match,
+        "profile_domain": profile_domain,
+        "profile_domain_label": DOMAIN_LABELS.get(profile_domain, "General / multidisciplinary"),
+        "job_domains": sorted(set(title_domains) | set(body_domains)),
         "topic": round(topic * 100), "role": round(role * 100),
         "country": round(country * 100), "timing": round(timing * 100),
     }
+
+
+def matches_are_current(user_id: str, kind: str) -> bool:
+    """Cheaply detect scores produced before the occupational-domain gate."""
+    conn = store.connect()
+    try:
+        row = conn.execute(
+            "SELECT breakdown FROM user_matches WHERE user_id=? AND profile_kind=? LIMIT 1",
+            (user_id, kind),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return False
+    try:
+        return json.loads(row["breakdown"] or "{}").get("matcher_version") == MATCHER_VERSION
+    except (TypeError, ValueError):
+        return False
 
 
 def rebuild_matches(user_id: str, kind: str) -> int:
