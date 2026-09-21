@@ -19,12 +19,6 @@ from .providers import get_config
 from .research import _search
 from .scoring import freshness_score, locate
 
-QUERIES = (
-    "construction manager", "civil engineer", "infrastructure manager",
-    "project manager construction", "water engineer", "asset manager infrastructure",
-)
-KEEP = ("construction", "civil", "infrastructure", "project manager", "water",
-        "engineering", "built environment", "asset management", "programme manager")
 WEB_JOB_HOSTS = (
     "jobs.lever.co", "boards.greenhouse.io", "job-boards.greenhouse.io",
     "jobs.ashbyhq.com", "apply.workable.com", "jobs.smartrecruiters.com",
@@ -214,45 +208,67 @@ def fetch(log=print) -> list[dict]:
             found[item["id"]] = item
     except Exception as exc:
         log(f"  !! NHS Jobs nursing feed failed: {exc}")
-    for query in QUERIES:
-        try:
-            response = requests.get("https://remotive.com/api/remote-jobs",
-                                    params={"search": query, "limit": 100},
-                                    headers=headers, timeout=REQUEST_TIMEOUT)
-            response.raise_for_status()
-            rows = response.json().get("jobs", [])
-            for row in rows:
-                item = _item("Remotive", "remotive", row.get("title", ""),
-                    row.get("company_name", ""), row.get("candidate_required_location", "Remote"),
-                    row.get("url", ""), _text(row.get("description", "")),
-                    (row.get("publication_date") or "")[:10], query)
-                found[item["id"]] = item
-            log(f"  remotive: {query:<32} {len(rows):3d} results")
-        except Exception as exc:
-            log(f"  !! Remotive query failed: {exc}")
+    try:
+        response = requests.get("https://remotive.com/api/remote-jobs",
+                                headers=headers, timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        rows = response.json().get("jobs", [])[:250]
+        for row in rows:
+            item = _item("Remotive", "remotive", row.get("title", ""),
+                row.get("company_name", ""), row.get("candidate_required_location", "Remote"),
+                row.get("url", ""), _text(row.get("description", "")),
+                (row.get("publication_date") or "")[:10], "all remote professions")
+            found[item["id"]] = item
+        log(f"  remotive: {len(rows)} jobs across all professions")
+    except Exception as exc:
+        log(f"  !! Remotive failed: {exc}")
 
     try:
         response = requests.get("https://www.arbeitnow.com/api/job-board-api",
                                 headers=headers, timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         rows = response.json().get("data", [])
-        kept = 0
         for row in rows:
             title = row.get("title", "")
             desc = _text(row.get("description", ""))
-            blob = f"{title} {desc}".lower()
-            if not any(term in blob for term in KEEP):
-                continue
             stamp = row.get("created_at")
             posted = (dt.datetime.fromtimestamp(stamp, dt.timezone.utc).date().isoformat()
                       if isinstance(stamp, (int, float)) else str(stamp or "")[:10])
             item = _item("Arbeitnow", "arbeitnow", title, row.get("company_name", ""),
                          row.get("location", ""), row.get("url", ""), desc, posted, "broad crawl")
             found[item["id"]] = item
-            kept += 1
-        log(f"  arbeitnow: {kept} relevant jobs")
+        log(f"  arbeitnow: {len(rows)} jobs across all professions")
     except Exception as exc:
         log(f"  !! Arbeitnow failed: {exc}")
+    try:
+        response = requests.get("https://jobicy.com/api/v2/remote-jobs",
+                                params={"count": 100}, headers=headers,
+                                timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        rows = response.json().get("jobs", [])
+        for row in rows:
+            item = _item("Jobicy", "jobicy", row.get("jobTitle", ""),
+                row.get("companyName", ""), row.get("jobGeo", "Remote"),
+                row.get("url", ""), _text(row.get("jobDescription") or row.get("jobExcerpt", "")),
+                (row.get("pubDate") or "")[:10], "all remote professions")
+            found[item["id"]] = item
+        log(f"  jobicy: {len(rows)} jobs across all professions")
+    except Exception as exc:
+        log(f"  !! Jobicy failed: {exc}")
+    try:
+        response = requests.get("https://remoteok.com/api", headers=headers,
+                                timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        rows = [row for row in response.json() if isinstance(row, dict) and row.get("position")]
+        for row in rows[:150]:
+            item = _item("Remote OK", "remoteok", row.get("position", ""),
+                row.get("company", ""), row.get("location") or "Remote",
+                row.get("url", ""), _text(row.get("description", "")),
+                (row.get("date") or "")[:10], "all remote professions")
+            found[item["id"]] = item
+        log(f"  remoteok: {min(len(rows), 150)} jobs across all professions")
+    except Exception as exc:
+        log(f"  !! Remote OK failed: {exc}")
     try:
         for item in _fetch_profile_web_jobs(log):
             found[item["id"]] = item
