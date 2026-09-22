@@ -18,6 +18,8 @@ from finder import application_pack
 from finder.matching import score_for_profile
 from finder.profiles import build_profile
 from finder.industry import _direct_job_result, _parse_nhs_xml, _worldwide_job_result
+from finder.docgen import tailor_cv_docx, webpage_pdf
+from finder.pack_requirements import detect_requirements
 
 EMAILS = ("product-test-one@example.invalid", "product-test-two@example.invalid")
 OPP_IDS = ("__product_academic__", "__product_industry__")
@@ -159,6 +161,53 @@ class ProductFlowTest(unittest.TestCase):
         profile = build_profile(cv, "industry")
         self.assertIn("Cybersecurity Consultant", profile["target_titles"])
 
+    def test_application_requirements_detect_diversity_and_word_limits(self):
+        material = (
+            "Submit a curriculum vitae, cover letter, research statement, teaching statement, "
+            "and a diversity statement limited to 750 words."
+        )
+        result = detect_requirements(material, "academic")
+        items = {item["key"]: item for item in result["submission_items"]}
+        self.assertIn("diversity_statement", items)
+        self.assertEqual(items["diversity_statement"]["limit"], "750 words")
+        self.assertIn("research_statement", result["documents"])
+
+    def test_docx_cv_tailoring_preserves_unedited_content_and_layout(self):
+        from docx import Document
+        from docx.shared import Inches
+        source = Document()
+        source.sections[0].left_margin = Inches(0.55)
+        source.add_heading("Curriculum Vitae", 0)
+        source.add_paragraph("Infrastructure engineer and researcher")
+        source.add_paragraph("Managed water infrastructure research projects", style="List Bullet")
+        source.add_paragraph("Publication record remains unchanged")
+        stream = io.BytesIO(); source.save(stream)
+        tailored, audit = tailor_cv_docx(stream.getvalue(), {
+            "replacements": [{"find": "Infrastructure engineer and researcher",
+                              "replacement": "Civil infrastructure engineer and researcher"}],
+            "additions": [{"after": "Managed water infrastructure research projects",
+                           "text": "Applied project management methods to infrastructure research",
+                           "style": "List Bullet"}],
+        })
+        result = Document(io.BytesIO(tailored))
+        text = "\n".join(p.text for p in result.paragraphs)
+        self.assertIn("Civil infrastructure engineer and researcher", text)
+        self.assertIn("Publication record remains unchanged", text)
+        self.assertIn("Applied project management methods", text)
+        self.assertAlmostEqual(result.sections[0].left_margin.inches, 0.55, places=2)
+        self.assertEqual(audit["replacements_applied"], 1)
+        self.assertEqual(audit["additions_applied"], 1)
+
+    def test_web_research_snapshot_is_a_valid_pdf(self):
+        data = webpage_pdf("Department Modules", "https://example.invalid/modules",
+                           "Module A covers infrastructure management.\n\nModule B covers BIM.",
+                           "2026-09-23T00:00:00+00:00")
+        self.assertTrue(data.startswith(b"%PDF"))
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(data))
+        self.assertGreaterEqual(len(reader.pages), 1)
+        self.assertIn("infrastructure management", reader.pages[0].extract_text().lower())
+
     def test_refresh_button_selects_only_the_current_track(self):
         client = app.test_client()
         was_running = pipeline.STATE["running"]
@@ -239,7 +288,10 @@ class ProductFlowTest(unittest.TestCase):
         finally:
             conn.close()
         self.assertEqual(two.get("/api/packs/__pack_test__/download").status_code, 404)
-        self.assertEqual(one.get("/api/packs/__pack_test__/download").status_code, 200)
+        own_download = one.get("/api/packs/__pack_test__/download")
+        self.assertEqual(own_download.status_code, 200)
+        self.assertIn("Assistant Professor of Construction Management at Example Engineering Group.zip",
+                      own_download.headers.get("Content-Disposition", ""))
 
         conn = store.connect()
         try:
@@ -250,23 +302,40 @@ class ProductFlowTest(unittest.TestCase):
             conn.commit()
         finally:
             conn.close()
-        generated = json.dumps({
-            "cover_letter": "## Application\n\n" + "Evidence-based tailored cover letter content. " * 12,
-            "tailored_cv": "## Profile\n\n" + "Factual construction and infrastructure experience. " * 12,
+        plan = json.dumps({
+            "submission_items": [
+                {"key": "cover_letter", "required": True, "detail": "Requested", "limit": ""},
+                {"key": "tailored_cv", "required": True, "detail": "Requested", "limit": ""},
+            ],
+            "criteria": [{"criterion": "Construction management expertise",
+                          "priority": "Essential", "evidence": "CV states this expertise"}],
+            "gaps": [], "cv_edits": {"replacements": [], "additions": []},
         })
+        generated = "## Application\n\n" + (
+            "Evidence-based tailored cover letter content grounded in the curriculum vitae. " * 60
+        )
         sources = [{"title": "Department courses", "url": "https://example.invalid/courses",
                     "snippet": "Construction management course information.",
-                    "query": "department courses", "retrieved_at": "2026-09-21"}]
-        with patch.object(application_pack, "chat", return_value=generated), \
-             patch.object(application_pack, "research_opportunity", return_value=sources):
+                    "text": "Construction management course information.",
+                    "kind": "web page", "query": "department courses",
+                    "retrieved_at": "2026-09-21"}]
+        research = {"sources": sources, "attachments": [],
+                    "advert_text": sample(OPP_IDS[0], "academic")["description"]}
+        with patch.object(application_pack, "chat", side_effect=[plan, generated]), \
+             patch.object(application_pack, "collect_application_research", return_value=research):
             application_pack._generate("__generated_pack__", uid_one, OPP_IDS[0], "academic",
                                        ["cover_letter", "tailored_cv"])
         pack = application_pack.get_pack(uid_one, "__generated_pack__", include_blob=True)
         self.assertEqual(pack["status"], "ready", pack.get("error"))
         with zipfile.ZipFile(io.BytesIO(base64.b64decode(pack["zip_blob"]))) as archive:
             names = set(archive.namelist())
-            self.assertTrue({"Cover_Letter.docx", "Tailored_CV.docx", "Research Sources.docx",
-                             "Job Advertisement.docx", "manifest.json"}.issubset(names))
+            self.assertIn("Application Documents/Cover Letter - Example Engineering Group.docx", names)
+            self.assertTrue(any(name.startswith("CV/Tailored CV Working Copy") for name in names))
+            self.assertTrue({"Research/Research Sources and Links.docx",
+                             "Job Materials/Job Advertisement Snapshot.docx",
+                             "Job Materials/Job Advertisement Snapshot.pdf",
+                             "Application Requirements and Evidence Plan.docx",
+                             "manifest.json", "README FIRST.txt"}.issubset(names))
 
 
 if __name__ == "__main__":

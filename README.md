@@ -29,8 +29,21 @@ SQLite file, with a 07:00 scheduled refresh.
    jobs, applied jobs and hidden jobs belong only to the signed-in user.
 4. Open **API settings** and add an AI provider. Search can use key-free
    DuckDuckGo or Tavily, Brave Search or Serper with the user's own key.
-5. Open a job and choose **Create Word application pack**. The ZIP contains
-   editable drafts, the job snapshot, the research sources and a manifest.
+5. Open a job and choose **Create researched application pack**. The downloaded
+   ZIP is named for the role and employer. It contains the original CV, a tailored
+   CV, every detected application document, an evidence plan, the job advert and
+   associated PDFs, saved PDF copies of department/employer research, source links
+   and a manifest.
+
+For format-preserving CV tailoring, upload a DOCX CV. The application pack edits
+a copy in place, keeps all untouched sections and includes the original file.
+PDF CVs are retained unchanged, but their visual design cannot be edited reliably
+as a Word document; the pack therefore includes a clearly labelled working copy.
+
+Application material is analysed before drafting. Explicit word limits are passed
+to the writer and documents such as diversity, outreach, teaching, research,
+leadership and selection-criteria statements are generated only when requested or
+appropriate to the advert. Every generated document still requires applicant review.
 
 Supported AI interfaces include OpenAI, Anthropic, Google Gemini, OpenRouter,
 Groq, Mistral, HTTPS OpenAI-compatible APIs and local Ollama/LM Studio when the

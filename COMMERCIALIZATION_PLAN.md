@@ -40,13 +40,17 @@ scores and application tracking, and downloadable Word application packs.
 
 - Research the employer, department, courses, research groups and role-specific
   requirements, retaining the page title, URL, excerpt and retrieval date.
-- Generate a tailored cover letter and the documents appropriate to the track:
-  academic statement package for academic roles and selection-criteria or
-  supporting-statement package for industry roles.
+- Download linked job descriptions, person specifications, candidate guidance
+  and application forms, and save researched web pages as readable PDFs.
+- Detect all requested documents and stated word limits before drafting, including
+  diversity, outreach, teaching, research, leadership and criteria statements.
+- Tailor a copy of an uploaded DOCX in place so its design and untouched content
+  are preserved; always include the original CV in the ZIP.
 - Ground drafts in the uploaded CV and collected sources. Do not invent
   publications, employment, metrics, qualifications or achievements.
-- Produce editable Microsoft Word files, a sources document, a job snapshot
-  and a manifest, then package them in a ZIP download.
+- Produce polished editable Microsoft Word files, an evidence plan, source PDFs,
+  a sources document, a job snapshot and a manifest, then package them in a ZIP
+  named for the role and employer.
 
 ### Phase 5 Commercial readiness
 

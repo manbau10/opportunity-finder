@@ -25,7 +25,9 @@ from flask import (Flask, flash, g, jsonify, redirect, render_template, request,
 
 from finder import db, pipeline, store
 from finder import auth, matching, profiles, providers
-from finder.application_pack import get_pack, start_pack
+from finder.application_pack import (
+    get_pack, get_pack_opportunity, pack_filename, start_pack,
+)
 from finder.config import DISPLAY_MIN_SCORE
 
 STALE_AFTER_HOURS = int(os.environ.get("STALE_AFTER_HOURS", "10"))
@@ -504,9 +506,10 @@ def download_pack(pack_id):
     pack = get_pack(g.user["id"], pack_id, include_blob=True)
     if not pack or pack["status"] != "ready" or not pack.get("zip_blob"):
         return jsonify({"error": "Application pack is not ready."}), 404
+    opportunity = get_pack_opportunity(pack) or {}
     return send_file(io.BytesIO(base64.b64decode(pack["zip_blob"])),
                      mimetype="application/zip", as_attachment=True,
-                     download_name=f"application-pack-{pack_id[:8]}.zip")
+                     download_name=pack_filename(opportunity))
 
 
 # ---------------------------------------------------------------------------

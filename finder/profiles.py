@@ -165,10 +165,14 @@ def save_profile(user_id: str, kind: str, filename: str, data: bytes) -> dict:
             "created_at": created, "updated_at": stamp}
 
 
-def get_profile(user_id: str, kind: str, include_text: bool = False) -> dict | None:
+def get_profile(user_id: str, kind: str, include_text: bool = False,
+                include_blob: bool = False) -> dict | None:
     # Always fetch the extracted text so profiles created before occupational
     # classification was introduced can be upgraded transparently.
-    fields = "id,user_id,kind,cv_filename,cv_mime,cv_sha256,cv_text,profile_json,created_at,updated_at"
+    fields = (
+        "id,user_id,kind,cv_filename,cv_mime,cv_sha256,cv_text,profile_json,"
+        "created_at,updated_at" + (",cv_blob" if include_blob else "")
+    )
     conn = store.connect()
     try:
         row = conn.execute(

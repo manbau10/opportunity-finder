@@ -270,7 +270,7 @@ async function openDrawer(id) {
       <button class="btn" data-d="saved">${it.status === 'saved' ? 'Unsave' : 'Save'}</button>
       <button class="btn" data-d="applied">${it.status === 'applied' ? 'Not applied' : 'Mark applied'}</button>
       <button class="btn ghost" data-d="dismissed">Hide this</button>
-      <button class="btn primary" id="drawerPack">Create Word application pack</button>
+      <button class="btn primary" id="drawerPack">Create researched application pack</button>
     </div>`;
 
   $('#drawer').hidden = false;
@@ -294,15 +294,15 @@ async function createPack(id, button) {
     if (data.settings_url && confirm((data.error || '') + '\n\nOpen API settings now?')) location.href=data.settings_url;
     return;
   }
-  button.textContent='Researching and writing…';
-  for (let attempt=0; attempt<80; attempt++) {
+  button.textContent='Checking requirements, researching and writing…';
+  for (let attempt=0; attempt<200; attempt++) {
     await new Promise(resolve=>setTimeout(resolve,3000));
     const statusResponse=await fetch('/api/packs/'+encodeURIComponent(data.id));
     const pack=await statusResponse.json();
     if (pack.status==='ready') {
       button.textContent='Download ZIP'; button.disabled=false;
       button.onclick=()=>{location.href='/api/packs/'+encodeURIComponent(data.id)+'/download';};
-      toast('Your editable Word application pack is ready.'); return;
+      toast('Your researched application pack is ready.'); return;
     }
     if (pack.status==='failed') {
       button.disabled=false; button.textContent=old; toast(pack.error || 'Pack generation failed.'); return;
