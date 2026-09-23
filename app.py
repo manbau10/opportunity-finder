@@ -26,7 +26,8 @@ from flask import (Flask, flash, g, jsonify, redirect, render_template, request,
 from finder import db, pipeline, store
 from finder import auth, matching, profiles, providers
 from finder.application_pack import (
-    get_pack, get_pack_opportunity, pack_filename, start_pack,
+    WORKSPACE_STEPS, get_pack, get_pack_file, get_pack_opportunity, list_pack_files,
+    list_packs, pack_filename, request_cancel, start_pack,
 )
 from finder.config import DISPLAY_MIN_SCORE
 
@@ -92,12 +93,19 @@ def _global_summary(conn) -> dict:
 def _user_summary(conn, user_id: str, kind: str, min_score: int) -> dict:
     today = dt.date.today().isoformat()
     row = conn.execute(
-        """SELECT COUNT(*) AS total,
-                  SUM(CASE WHEN m.score >= 70 THEN 1 ELSE 0 END) AS strong,
-                  SUM(CASE WHEN substr(o.first_seen,1,10)=? THEN 1 ELSE 0 END) AS today,
+        """SELECT
+                  SUM(CASE WHEN m.status!='dismissed' AND (o.days_left IS NULL OR o.days_left>=0)
+                           THEN 1 ELSE 0 END) AS total,
+                  SUM(CASE WHEN m.score >= 70 AND m.status!='dismissed'
+                                AND (o.days_left IS NULL OR o.days_left>=0)
+                           THEN 1 ELSE 0 END) AS strong,
+                  SUM(CASE WHEN substr(o.first_seen,1,10)=? AND m.status!='dismissed'
+                                AND (o.days_left IS NULL OR o.days_left>=0)
+                           THEN 1 ELSE 0 END) AS today,
                   SUM(CASE WHEN m.status='saved' THEN 1 ELSE 0 END) AS saved,
                   SUM(CASE WHEN m.status='applied' THEN 1 ELSE 0 END) AS applied,
-                  SUM(CASE WHEN o.days_left IS NOT NULL AND o.days_left BETWEEN 0 AND 7
+                  SUM(CASE WHEN m.status!='dismissed' AND o.days_left IS NOT NULL
+                                AND o.days_left BETWEEN 0 AND 7
                            THEN 1 ELSE 0 END) AS closing
            FROM user_matches m JOIN opportunities o ON o.id=m.opportunity_id
            WHERE m.user_id=? AND m.profile_kind=? AND m.score>=?""",
@@ -208,6 +216,26 @@ def settings_page():
                            catalog=providers.public_catalog(), csrf=auth.csrf_token())
 
 
+@app.route("/applications")
+@auth.login_required
+def applications_page():
+    return render_template("applications.html", user=g.user,
+                           packs=list_packs(g.user["id"]), csrf=auth.csrf_token())
+
+
+@app.route("/applications/<pack_id>")
+@auth.login_required
+def application_workspace(pack_id):
+    pack = get_pack(g.user["id"], pack_id)
+    if not pack:
+        return render_template("application_missing.html", user=g.user,
+                               csrf=auth.csrf_token()), 404
+    opportunity = get_pack_opportunity(pack) or {}
+    return render_template("application_pack.html", user=g.user, pack=pack,
+                           opportunity=opportunity, steps=WORKSPACE_STEPS,
+                           csrf=auth.csrf_token())
+
+
 @app.route("/healthz")
 def healthz():
     return jsonify({"ok": True, "backend": db.backend(),
@@ -271,6 +299,8 @@ def api_opportunities():
         where.append("(o.days_left IS NULL OR o.days_left >= 0)")
     elif deadline == "soon":
         where.append("o.days_left IS NOT NULL AND o.days_left BETWEEN 0 AND 14")
+    elif deadline == "week":
+        where.append("o.days_left IS NOT NULL AND o.days_left BETWEEN 0 AND 7")
 
     if search:
         where.append("(lower(o.title) LIKE ? OR lower(o.org) LIKE ? OR "
@@ -299,8 +329,6 @@ def api_opportunities():
             item["matched_terms"] = json.loads(item.pop("user_terms") or "[]")
             item["breakdown"] = json.loads(item.pop("user_breakdown") or "{}")
             items.append(item)
-        for item in items:
-            item["description"] = (item.get("description") or "")[:600]
         facets = {
             "countries": [dict(r) for r in conn.execute(
                 """SELECT o.country AS name,COUNT(*) AS n FROM user_matches m
@@ -490,14 +518,83 @@ def api_create_pack():
                         "settings_url": url_for("settings_page")}), 400
     pack_id = start_pack(g.user["id"], data["opportunity_id"], kind,
                          data.get("documents") or [])
-    return jsonify({"ok": True, "id": pack_id, "status": "working"}), 202
+    return jsonify({"ok": True, "id": pack_id, "status": "working",
+                    "workspace_url": url_for("application_workspace", pack_id=pack_id)}), 202
+
+
+def _pack_payload(user_id: str, pack: dict) -> dict:
+    files = list_pack_files(user_id, pack["id"])
+    opportunity = get_pack_opportunity(pack) or {}
+    current = pack.get("current_step") or "research"
+    status = pack.get("status") or "working"
+    current_index = next((i for i, step in enumerate(WORKSPACE_STEPS)
+                          if step["key"] == current), 0)
+    steps = []
+    for index, definition in enumerate(WORKSPACE_STEPS):
+        item = dict(definition)
+        if status == "ready":
+            item["status"] = "complete"
+        elif index < current_index:
+            item["status"] = "complete"
+        elif index == current_index:
+            item["status"] = ("failed" if status == "failed" else
+                              "cancelled" if status == "cancelled" else "active")
+        else:
+            item["status"] = "waiting"
+        item["files"] = [file for file in files if file["step_key"] == item["key"]]
+        steps.append(item)
+    return {
+        "id": pack["id"], "status": status, "progress": pack.get("progress") or 0,
+        "current_step": current, "message": pack.get("step_message") or "",
+        "error": pack.get("error"), "cancel_requested": bool(pack.get("cancel_requested")),
+        "created_at": pack.get("created_at"), "updated_at": pack.get("updated_at"),
+        "completed_at": pack.get("completed_at"), "profile_kind": pack.get("profile_kind"),
+        "opportunity": opportunity, "steps": steps, "files": files,
+    }
 
 
 @app.route("/api/packs/<pack_id>")
 @auth.login_required
 def api_pack_status(pack_id):
     pack = get_pack(g.user["id"], pack_id)
-    return (jsonify(pack) if pack else (jsonify({"error": "not found"}), 404))
+    return (jsonify(_pack_payload(g.user["id"], pack)) if pack else
+            (jsonify({"error": "not found"}), 404))
+
+
+@app.route("/api/packs/<pack_id>/files/<file_id>")
+@auth.login_required
+def download_pack_file(pack_id, file_id):
+    item = get_pack_file(g.user["id"], pack_id, file_id)
+    if not item:
+        return jsonify({"error": "File not found."}), 404
+    name = (item.get("filename") or "application-file").replace("\\", "/").rsplit("/", 1)[-1]
+    return send_file(io.BytesIO(base64.b64decode(item["file_blob"])),
+                     mimetype=item.get("mime_type") or "application/octet-stream",
+                     as_attachment=True, download_name=name)
+
+
+@app.route("/api/packs/<pack_id>/cancel", methods=["POST"])
+@auth.login_required
+def cancel_pack(pack_id):
+    auth.verify_csrf()
+    if not request_cancel(g.user["id"], pack_id):
+        return jsonify({"error": "This workspace is not currently running."}), 409
+    return jsonify({"ok": True})
+
+
+@app.route("/api/packs/<pack_id>/retry", methods=["POST"])
+@auth.login_required
+def retry_pack(pack_id):
+    auth.verify_csrf()
+    existing = get_pack(g.user["id"], pack_id)
+    if not existing:
+        return jsonify({"error": "Workspace not found."}), 404
+    plan = json.loads(existing.get("plan_json") or "{}")
+    documents = plan.get("documents") if isinstance(plan, dict) else []
+    new_id = start_pack(g.user["id"], existing["opportunity_id"],
+                        existing["profile_kind"], documents or [])
+    return jsonify({"ok": True, "id": new_id,
+                    "workspace_url": url_for("application_workspace", pack_id=new_id)}), 202
 
 
 @app.route("/api/packs/<pack_id>/download")

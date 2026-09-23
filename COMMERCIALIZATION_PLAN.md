@@ -36,7 +36,7 @@ scores and application tracking, and downloadable Word application packs.
   fallback.
 - Test a provider configuration before saving it and show actionable errors.
 
-### Phase 4 Application pack generation
+### Phase 4 Application workspace generation
 
 - Research the employer, department, courses, research groups and role-specific
   requirements, retaining the page title, URL, excerpt and retrieval date.
@@ -45,18 +45,18 @@ scores and application tracking, and downloadable Word application packs.
 - Detect all requested documents and stated word limits before drafting, including
   diversity, outreach, teaching, research, leadership and criteria statements.
 - Tailor a copy of an uploaded DOCX in place so its design and untouched content
-  are preserved; always include the original CV in the ZIP.
+  are preserved; always make the original CV available in the workspace.
 - Ground drafts in the uploaded CV and collected sources. Do not invent
   publications, employment, metrics, qualifications or achievements.
 - Produce polished editable Microsoft Word files, an evidence plan, source PDFs,
-  a sources document, a job snapshot and a manifest, then package them in a ZIP
-  named for the role and employer.
+  a sources document, a job snapshot and a manifest. Save each output as soon as
+  it is complete so the user can download it while later stages continue.
 
 ### Phase 5 Commercial readiness
 
 - Add verified email, password reset, account deletion and export.
 - Add subscription billing, quotas, metering and an administrator console.
-- Move long refresh and pack-generation work to a durable task queue.
+- Move long refresh and application-generation work to a durable task queue.
 - Add object storage, malware scanning, retention controls, backups, audit logs,
   privacy terms, data-processing documentation and operational monitoring.
 - Confirm licensing and terms of service for every job and search source before
@@ -67,15 +67,16 @@ scores and application tracking, and downloadable Word application packs.
 - Passwords are hashed; provider keys are encrypted; CVs are private.
 - Every user-owned query includes the authenticated user ID.
 - Uploads are bounded and parsed in memory; filenames never become server paths.
-- Application packs are generated on demand and downloaded only by their owner.
+- Application workspaces are generated on demand and available only to their owner.
 - Secrets stay in environment variables and are never committed to GitHub.
 - AI prompts instruct providers not to fabricate evidence and source links are
-  included in every pack for review.
+  included in every workspace for review.
 
 ## Definition of the first commercial MVP
 
 The first MVP is complete when two test users can register, upload different
 CVs for both tracks, receive different scores for the same posting, keep
 separate saved/applied lists, configure an AI and search provider, generate a
-Word-based application ZIP, and cannot read each other's profiles, keys or
-packs. The live deployment must preserve these records across redeployments.
+staged application workspace with individual Word and PDF downloads, and cannot
+read each other's profiles, keys or workspaces. The live deployment must preserve
+these records across redeployments.

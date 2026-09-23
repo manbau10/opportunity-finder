@@ -3,7 +3,7 @@
 Opportunity Finder is now a multi-user, CV-personalized product. Every account
 has separate Academic and Industry profiles, private scores and application
 tracking, encrypted bring-your-own AI/search settings, and downloadable Word
-application packs with a research-source audit trail.
+application workspaces with staged progress and a research-source audit trail.
 
 A daily dashboard of academic posts — faculty, fellowships and postdocs — gathered
 from four job boards plus a curated fellowship register, and scored against
@@ -29,16 +29,16 @@ SQLite file, with a 07:00 scheduled refresh.
    jobs, applied jobs and hidden jobs belong only to the signed-in user.
 4. Open **API settings** and add an AI provider. Search can use key-free
    DuckDuckGo or Tavily, Brave Search or Serper with the user's own key.
-5. Open a job and choose **Create researched application pack**. The downloaded
-   ZIP is named for the role and employer. It contains the original CV, a tailored
-   CV, every detected application document, an evidence plan, the job advert and
-   associated PDFs, saved PDF copies of department/employer research, source links
-   and a manifest.
+5. Open a job and choose **Create application workspace**. A dedicated page shows
+   research, requirements analysis, CV tailoring, drafting and final checks as
+   they happen. Every completed Word document, PDF and source file can be downloaded
+   individually while the remaining work continues. Workspaces remain available
+   under **My applications**.
 
-For format-preserving CV tailoring, upload a DOCX CV. The application pack edits
+For format-preserving CV tailoring, upload a DOCX CV. The application workspace edits
 a copy in place, keeps all untouched sections and includes the original file.
 PDF CVs are retained unchanged, but their visual design cannot be edited reliably
-as a Word document; the pack therefore includes a clearly labelled working copy.
+as a Word document; the workspace therefore includes a clearly labelled working copy.
 
 Application material is analysed before drafting. Explicit word limits are passed
 to the writer and documents such as diversity, outreach, teaching, research,

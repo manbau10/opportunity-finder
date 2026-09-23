@@ -3,13 +3,13 @@
 <title>API settings | Opportunity Finder</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
 <body><header class="topbar"><div class="brand"><div class="mark">OF</div><div><h1>AI and search settings</h1>
 <p class="sub">Bring your own provider and keep control of usage costs</p></div></div>
-<div class="topbar-right"><a class="btn" href="/">Back to opportunities</a></div></header>
+<div class="topbar-right"><a class="btn" href="{{ url_for('applications_page') }}">My applications</a><a class="btn" href="/">Back to opportunities</a></div></header>
 <main class="settings-shell"><div class="page-intro"><h2>Connect your AI key</h2>
 <p>You do not need to understand APIs. Choose where your key came from, paste it once, then use <b>Save and test</b>. Keys are encrypted before storage and are never returned to your browser.</p></div>
 <section class="settings-card provider-guide" id="poeGuide">
   <div class="eyebrow">Recommended for your Poe key</div><h2>Set up Poe in three steps</h2>
   <ol><li>Select <b>Poe</b> below.</li><li>Paste the key from <a href="https://poe.com/api/keys" target="_blank" rel="noopener">Poe API keys</a>. Do not paste your Poe password.</li><li>Press <b>Save and test</b>. The endpoint and recommended model are filled automatically.</li></ol>
-  <p class="tiny muted">Poe uses your Poe points for API requests. Use an official Poe bot and check your points before generating a large application pack.</p>
+  <p class="tiny muted">Poe uses your Poe points for API requests. Use an official Poe bot and check your points before generating a large application workspace.</p>
 </section>
 <form id="providerForm" class="settings-card stack-form">
   <div class="form-grid">

@@ -27,6 +27,7 @@
       <span>Refresh now</span>
     </button>
     <button id="themeBtn" class="btn icon" title="Toggle theme" aria-label="Toggle theme">◐</button>
+    <a class="btn" href="{{ url_for('applications_page') }}">My applications</a>
     <a class="btn" href="{{ url_for('profile_page') }}">CVs</a>
     <a class="btn" href="{{ url_for('settings_page') }}">API settings</a>
     <form method="post" action="{{ url_for('logout') }}" class="inline-form">

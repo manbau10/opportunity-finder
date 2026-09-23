@@ -7,7 +7,6 @@ import io
 import os
 import unittest
 import json
-import zipfile
 from unittest.mock import patch
 
 os.environ.setdefault("SECRET_KEY", "integration-test-secret-not-for-production")
@@ -19,6 +18,7 @@ from finder.matching import score_for_profile
 from finder.profiles import build_profile
 from finder.industry import _direct_job_result, _parse_nhs_xml, _worldwide_job_result
 from finder.docgen import tailor_cv_docx, webpage_pdf
+from finder.enrich import explicit_deadline
 from finder.pack_requirements import detect_requirements
 
 EMAILS = ("product-test-one@example.invalid", "product-test-two@example.invalid")
@@ -31,6 +31,7 @@ def cleanup_test_records() -> None:
         users = conn.execute("SELECT id FROM users WHERE email IN (?,?)", EMAILS).fetchall()
         for user in users:
             uid = user["id"]
+            conn.execute("DELETE FROM application_pack_files WHERE user_id=?", (uid,))
             conn.execute("DELETE FROM application_packs WHERE user_id=?", (uid,))
             conn.execute("DELETE FROM provider_configs WHERE user_id=?", (uid,))
             conn.execute("DELETE FROM user_matches WHERE user_id=?", (uid,))
@@ -172,6 +173,11 @@ class ProductFlowTest(unittest.TestCase):
         self.assertEqual(items["diversity_statement"]["limit"], "750 words")
         self.assertIn("research_statement", result["documents"])
 
+    def test_advert_application_window_overrides_aggregator_deadline(self):
+        text = ("Review of applications will start from July 2026 and continue until "
+                "August 31, 2026 or until the post is filled.")
+        self.assertEqual(explicit_deadline(text), "2026-08-31")
+
     def test_docx_cv_tailoring_preserves_unedited_content_and_layout(self):
         from docx import Document
         from docx.shared import Inches
@@ -292,6 +298,9 @@ class ProductFlowTest(unittest.TestCase):
         self.assertEqual(own_download.status_code, 200)
         self.assertIn("Assistant Professor of Construction Management at Example Engineering Group.zip",
                       own_download.headers.get("Content-Disposition", ""))
+        self.assertEqual(two.get("/applications/__pack_test__").status_code, 404)
+        self.assertEqual(one.get("/applications/__pack_test__").status_code, 200)
+        self.assertIn(b"Application workspace", one.get("/applications/__pack_test__").data)
 
         conn = store.connect()
         try:
@@ -327,15 +336,31 @@ class ProductFlowTest(unittest.TestCase):
                                        ["cover_letter", "tailored_cv"])
         pack = application_pack.get_pack(uid_one, "__generated_pack__", include_blob=True)
         self.assertEqual(pack["status"], "ready", pack.get("error"))
-        with zipfile.ZipFile(io.BytesIO(base64.b64decode(pack["zip_blob"]))) as archive:
-            names = set(archive.namelist())
-            self.assertIn("Application Documents/Cover Letter - Example Engineering Group.docx", names)
-            self.assertTrue(any(name.startswith("CV/Tailored CV Working Copy") for name in names))
-            self.assertTrue({"Research/Research Sources and Links.docx",
-                             "Job Materials/Job Advertisement Snapshot.docx",
-                             "Job Materials/Job Advertisement Snapshot.pdf",
-                             "Application Requirements and Evidence Plan.docx",
-                             "manifest.json", "README FIRST.txt"}.issubset(names))
+        self.assertEqual(pack["progress"], 100)
+        self.assertIsNone(pack["zip_blob"])
+        files = application_pack.list_pack_files(uid_one, "__generated_pack__")
+        names = {item["filename"] for item in files}
+        self.assertIn("Application Documents/Cover Letter - Example Engineering Group.docx", names)
+        self.assertTrue(any(name.startswith("CV/Tailored CV Working Copy") for name in names))
+        self.assertTrue({"Research/Research Sources and Links.docx",
+                         "Job Materials/Job Advertisement Snapshot.docx",
+                         "Job Materials/Job Advertisement Snapshot.pdf",
+                         "Application Requirements and Evidence Plan.docx",
+                         "manifest.json", "README FIRST.txt"}.issubset(names))
+        status = one.get("/api/packs/__generated_pack__")
+        self.assertEqual(status.status_code, 200)
+        payload = status.get_json()
+        self.assertEqual(payload["status"], "ready")
+        self.assertEqual(payload["progress"], 100)
+        self.assertEqual(len(payload["steps"]), 5)
+        self.assertTrue(all(step["status"] == "complete" for step in payload["steps"]))
+        cover = next(item for item in files if item["filename"].startswith("Application Documents/"))
+        own_file = one.get(f"/api/packs/__generated_pack__/files/{cover['id']}")
+        self.assertEqual(own_file.status_code, 200)
+        self.assertTrue(own_file.data.startswith(b"PK"))
+        self.assertEqual(two.get(f"/api/packs/__generated_pack__/files/{cover['id']}").status_code, 404)
+        self.assertIn(b"Download only the files you need",
+                      one.get("/applications/__generated_pack__").data)
 
 
 if __name__ == "__main__":

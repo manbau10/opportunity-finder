@@ -73,18 +73,38 @@ function renderStats(s) {
     ? new Date(s.last_refresh).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
     : 'never';
   const cells = [
-    ['hot',  s.new_today,    'found today'],
-    ['hot',  s.strong,       'strong matches (70+)'],
-    ['',     s.total,        'live opportunities'],
-    ['warn', s.closing_soon, 'closing within 7 days'],
-    ['',     s.saved,        'saved'],
-    ['',     s.applied,      'applied']
+    ['hot',  s.new_today,    'found today', 'today'],
+    ['hot',  s.strong,       'strong matches (70+)', 'strong'],
+    ['',     s.total,        'live opportunities', 'live'],
+    ['warn', s.closing_soon, 'closing within 7 days', 'closing'],
+    ['',     s.saved,        'saved', 'saved'],
+    ['',     s.applied,      'applied', 'applied']
   ];
-  $('#stats').innerHTML = cells.map(([cls, n, k]) =>
-    `<div class="stat ${cls}"><div class="n">${n ?? 0}</div><div class="k">${k}</div></div>`
+  $('#stats').innerHTML = cells.map(([cls, n, k, action]) =>
+    `<button type="button" class="stat ${cls}" data-stat="${action}" aria-label="Show ${esc(k)}">
+       <div class="n">${n ?? 0}</div><div class="k">${k}</div></button>`
   ).join('') +
   `<div class="stat"><div class="n" style="font-size:14px;padding-top:7px">${esc(when)}</div>
      <div class="k">last refresh</div></div>`;
+  $$('[data-stat]').forEach(button => button.onclick = () => applyHeadlineFilter(button.dataset.stat));
+}
+
+function applyHeadlineFilter(action) {
+  Object.assign(state, {q:'', roles:[], countries:[], sources:[], window:'any',
+                        status:'open', deadline:'live'});
+  if (action === 'today') state.window = 'today';
+  if (action === 'strong') state.min_score = 70;
+  if (action === 'closing') state.deadline = 'week';
+  if (action === 'saved') { state.status = 'saved'; state.deadline = 'any'; }
+  if (action === 'applied') { state.status = 'applied'; state.deadline = 'any'; }
+  $('#q').value = '';
+  $('#minScore').value = state.min_score;
+  $('#minScoreVal').textContent = state.min_score;
+  $$('#deadlineSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === state.deadline));
+  $$('#windowSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === state.window));
+  $$('#statusSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === state.status));
+  load();
+  document.querySelector('.results-head').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 /* ------------------------------------------------------------------ facets */
@@ -174,7 +194,7 @@ function card(item) {
       <button class="btn tiny" data-act="saved">${item.status === 'saved' ? '★ Saved' : '☆ Save'}</button>
       <button class="btn tiny" data-act="applied">${item.status === 'applied' ? '✓ Applied' : 'Applied'}</button>
       <button class="btn tiny ghost" data-act="dismissed">Hide</button>
-      <button class="btn tiny pack-btn" data-pack="${esc(item.id)}">Create application pack</button>
+      <button class="btn tiny pack-btn" data-pack="${esc(item.id)}">Create application workspace</button>
     </div>
   </article>`;
 }
@@ -262,15 +282,15 @@ async function openDrawer(id) {
       <dt>Status</dt><dd>${esc(it.status)}</dd>
     </dl>
 
-    <h4>Advert text</h4>
-    <p class="desc">${esc((it.description || '').slice(0, 3500))}</p>
+    <h4>Full advert text</h4>
+    <p class="desc">${esc(it.description || 'No advert text was supplied by this source.')}</p>
 
     <div class="drawer-actions">
       <a class="btn primary" href="${esc(it.url)}" target="_blank" rel="noopener">Open the advert</a>
       <button class="btn" data-d="saved">${it.status === 'saved' ? 'Unsave' : 'Save'}</button>
       <button class="btn" data-d="applied">${it.status === 'applied' ? 'Not applied' : 'Mark applied'}</button>
       <button class="btn ghost" data-d="dismissed">Hide this</button>
-      <button class="btn primary" id="drawerPack">Create researched application pack</button>
+      <button class="btn primary" id="drawerPack">Create application workspace</button>
     </div>`;
 
   $('#drawer').hidden = false;
@@ -294,21 +314,8 @@ async function createPack(id, button) {
     if (data.settings_url && confirm((data.error || '') + '\n\nOpen API settings now?')) location.href=data.settings_url;
     return;
   }
-  button.textContent='Checking requirements, researching and writing…';
-  for (let attempt=0; attempt<200; attempt++) {
-    await new Promise(resolve=>setTimeout(resolve,3000));
-    const statusResponse=await fetch('/api/packs/'+encodeURIComponent(data.id));
-    const pack=await statusResponse.json();
-    if (pack.status==='ready') {
-      button.textContent='Download ZIP'; button.disabled=false;
-      button.onclick=()=>{location.href='/api/packs/'+encodeURIComponent(data.id)+'/download';};
-      toast('Your researched application pack is ready.'); return;
-    }
-    if (pack.status==='failed') {
-      button.disabled=false; button.textContent=old; toast(pack.error || 'Pack generation failed.'); return;
-    }
-  }
-  button.disabled=false; button.textContent=old; toast('Generation is still running. Try again shortly.');
+  button.textContent='Opening workspace…';
+  location.href=data.workspace_url || ('/applications/'+encodeURIComponent(data.id));
 }
 
 $('#drawerClose').onclick = () => { $('#drawer').hidden = true; };
@@ -408,7 +415,8 @@ function updateFilterHint() {
   if (state.roles.length) active.push(state.roles.length + ' type' + (state.roles.length > 1 ? 's' : ''));
   if (state.countries.length) active.push(state.countries.length + ' countr' + (state.countries.length > 1 ? 'ies' : 'y'));
   if (state.sources.length) active.push(state.sources.length + ' source' + (state.sources.length > 1 ? 's' : ''));
-  if (state.deadline !== 'live') active.push(state.deadline === 'soon' ? 'closing soon' : 'any deadline');
+  if (state.deadline !== 'live') active.push(state.deadline === 'soon' ? 'closing within 14 days' :
+    state.deadline === 'week' ? 'closing within 7 days' : 'any deadline');
   if (state.window !== 'any') active.push(state.window);
   if (state.status !== 'open') active.push(state.status);
   $('#filtersHint').textContent = active.length ? active.join(' · ') : 'none applied';

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>My applications · Opportunity Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand brand-link" href="{{ url_for('index') }}"><div class="mark">OF</div><div><h1>Opportunity Finder</h1><p class="sub">Your application workspaces</p></div></a>
+  <div class="topbar-right"><a class="btn primary" href="{{ url_for('index') }}">Find opportunities</a><a class="btn" href="{{ url_for('profile_page') }}">CVs</a></div>
+</header>
+<main class="settings-shell applications-shell">
+  <div class="page-intro"><p class="eyebrow">My applications</p><h2>Continue or download your application work</h2><p>Research and completed documents are kept in each workspace, even if a later step fails or is stopped.</p></div>
+  {% if packs %}
+  <div class="application-history">
+    {% for item in packs %}
+    <a class="history-card" href="{{ url_for('application_workspace', pack_id=item.id) }}">
+      <div class="history-main">
+        <div class="history-top"><span class="track-pill">{{ item.profile_kind | title }}</span><span class="workspace-status status-{{ item.status }}">{{ item.status | title }}</span></div>
+        <h3>{{ item.title or 'Opportunity no longer listed' }}</h3>
+        <p>{{ item.org or 'Organisation' }}{% if item.location %} · {{ item.location }}{% endif %}</p>
+        <div class="mini-progress"><span style="width:{{ item.progress or 0 }}%"></span></div>
+      </div>
+      <div class="history-side"><strong>{{ item.file_count or 0 }}</strong><span>files ready</span><small>{{ (item.updated_at or item.created_at or '')[:16] | replace('T', ' ') }}</small></div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <section class="settings-card empty-history"><h2>No applications yet</h2><p>Open a matched opportunity and choose Create application workspace. You will see every stage and file here.</p><a class="btn primary" href="{{ url_for('index') }}">Browse opportunities</a></section>
+  {% endif %}
+</main>
+</body>
+</html>

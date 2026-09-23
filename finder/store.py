@@ -18,6 +18,14 @@ FIELDS = ["id", "source", "source_key", "title", "org", "department", "location"
 
 # Columns added after the first release; created on connect if missing.
 LATER_COLUMNS = (("positives", "TEXT"), ("career_track", "TEXT DEFAULT 'academic'"))
+PACK_LATER_COLUMNS = (
+    ("progress", "INTEGER DEFAULT 0"),
+    ("current_step", "TEXT DEFAULT 'research'"),
+    ("step_message", "TEXT"),
+    ("plan_json", "TEXT"),
+    ("cancel_requested", "INTEGER DEFAULT 0"),
+    ("updated_at", "TEXT"),
+)
 
 
 _schema_ready = False
@@ -51,8 +59,30 @@ def _migrate(conn: db.Connection) -> None:
             changed = True
     if changed:
         conn.commit()
+    pack_have = conn.columns("application_packs")
+    pack_changed = False
+    for column, ddl in PACK_LATER_COLUMNS:
+        if column not in pack_have:
+            conn.execute("ALTER TABLE application_packs ADD COLUMN %s %s" % (column, ddl))
+            pack_changed = True
+    if pack_changed:
+        conn.commit()
     conn.execute("CREATE INDEX IF NOT EXISTS idx_track ON opportunities(career_track)")
+    # Correct previously stored aggregator deadlines when the advert text
+    # contains a more specific application closing date.
+    from .enrich import explicit_deadline
+    repaired = False
+    rows = conn.execute(
+        "SELECT id,deadline,description FROM opportunities WHERE description IS NOT NULL"
+    ).fetchall()
+    for row in rows:
+        stated = explicit_deadline(row["description"] or "")
+        if stated and stated != (row["deadline"] or ""):
+            conn.execute("UPDATE opportunities SET deadline=? WHERE id=?", (stated, row["id"]))
+            repaired = True
     conn.commit()
+    if repaired:
+        recompute_days_left(conn)
 
 
 def _enc(value):

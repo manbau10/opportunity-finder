@@ -131,10 +131,32 @@ CREATE TABLE IF NOT EXISTS application_packs (
     sources_json    TEXT,
     zip_blob        TEXT,
     error           TEXT,
+    progress        INTEGER DEFAULT 0,
+    current_step    TEXT DEFAULT 'research',
+    step_message    TEXT,
+    plan_json       TEXT,
+    cancel_requested INTEGER DEFAULT 0,
     created_at      TEXT NOT NULL,
+    updated_at      TEXT,
     completed_at    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_packs_user ON application_packs(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS application_pack_files (
+    id          TEXT PRIMARY KEY,
+    pack_id     TEXT NOT NULL,
+    user_id     TEXT NOT NULL,
+    step_key    TEXT NOT NULL,
+    filename    TEXT NOT NULL,
+    mime_type   TEXT NOT NULL,
+    file_blob   TEXT NOT NULL,
+    size_bytes  INTEGER NOT NULL,
+    sort_order  INTEGER DEFAULT 0,
+    created_at  TEXT NOT NULL,
+    UNIQUE(pack_id, filename)
+);
+CREATE INDEX IF NOT EXISTS idx_pack_files_pack
+    ON application_pack_files(pack_id, user_id, sort_order, created_at);
 """
 
 _REFRESHES_SQLITE = """

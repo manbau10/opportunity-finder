@@ -12,7 +12,7 @@ from .auth import now
 from .profiles import get_profile
 from .domains import DOMAIN_LABELS, job_domain_evidence
 
-MATCHER_VERSION = 3
+MATCHER_VERSION = 4
 
 
 def _terms(text: str) -> set[str]:

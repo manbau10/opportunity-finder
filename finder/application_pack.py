@@ -1,4 +1,4 @@
-"""Generate researched, evidence-gated Word application packs and private ZIPs."""
+"""Generate researched, evidence-gated application workspaces one file at a time."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import json
 import re
 import threading
 import uuid
-import zipfile
 
 from docx import Document
 
@@ -23,7 +22,6 @@ from .profiles import get_profile
 from .providers import chat
 from .research import collect_application_research, public_source
 
-PACK_LOCK = threading.Lock()
 MAX_PACK_ATTACHMENTS_BYTES = 28 * 1024 * 1024
 DOCUMENT_ORDER = [
     "cover_letter", "supporting_statement", "selection_criteria",
@@ -31,6 +29,28 @@ DOCUMENT_ORDER = [
     "diversity_statement", "outreach_statement", "leadership_statement",
     "list_of_publications", "references",
 ]
+
+WORKSPACE_STEPS = [
+    {"key": "research", "label": "Research the role and organisation",
+     "description": "Capture the live advert, attached job documents, department or employer pages, courses and useful source links.",
+     "start": 2, "complete": 28},
+    {"key": "requirements", "label": "Analyse requirements and evidence",
+     "description": "Identify required documents, selection criteria, word limits, evidence from the CV and any gaps to check.",
+     "start": 30, "complete": 42},
+    {"key": "cv", "label": "Prepare the tailored CV",
+     "description": "Preserve the uploaded CV and tailor a working copy without inventing facts or removing untouched content.",
+     "start": 45, "complete": 58},
+    {"key": "documents", "label": "Write the application documents",
+     "description": "Draft each required statement or letter separately and make it downloadable as soon as it passes validation.",
+     "start": 60, "complete": 92},
+    {"key": "review", "label": "Complete quality checks",
+     "description": "Create the review guide and manifest, check file integrity and leave every output available separately.",
+     "start": 94, "complete": 100},
+]
+
+
+class PackCancelled(Exception):
+    pass
 
 
 def _safe_name(value: str, maximum: int = 120) -> str:
@@ -311,6 +331,71 @@ def _unique_path(path: str, used: set[str]) -> str:
     return f"{uuid.uuid4().hex[:6]} {path}"
 
 
+def _mime_type(filename: str) -> str:
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return {
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pdf": "application/pdf", "json": "application/json", "txt": "text/plain",
+        "doc": "application/msword", "rtf": "application/rtf",
+    }.get(suffix, "application/octet-stream")
+
+
+def _update_progress(pack_id: str, user_id: str, step: str, progress: int,
+                     message: str, *, status: str = "working", error: str | None = None,
+                     plan: dict | None = None, completed: bool = False) -> None:
+    conn = store.connect()
+    try:
+        conn.execute(
+            """UPDATE application_packs SET status=?,current_step=?,progress=?,step_message=?,
+               error=?,plan_json=COALESCE(?,plan_json),updated_at=?,completed_at=?
+               WHERE id=? AND user_id=?""",
+            (status, step, max(0, min(100, int(progress))), message, error,
+             json.dumps(plan, ensure_ascii=False) if plan is not None else None,
+             now(), now() if completed else None, pack_id, user_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _cancelled(pack_id: str, user_id: str) -> bool:
+    conn = store.connect()
+    try:
+        row = conn.execute(
+            "SELECT cancel_requested FROM application_packs WHERE id=? AND user_id=?",
+            (pack_id, user_id),
+        ).fetchone()
+        return bool(row and row["cancel_requested"])
+    finally:
+        conn.close()
+
+
+def _check_cancelled(pack_id: str, user_id: str) -> None:
+    if _cancelled(pack_id, user_id):
+        raise PackCancelled()
+
+
+def _save_file(pack_id: str, user_id: str, step: str, filename: str, data: bytes,
+               sort_order: int, used: set[str]) -> dict:
+    filename = _unique_path(filename, used)
+    file_id = uuid.uuid4().hex
+    conn = store.connect()
+    try:
+        conn.execute(
+            """INSERT INTO application_pack_files
+               (id,pack_id,user_id,step_key,filename,mime_type,file_blob,size_bytes,sort_order,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (file_id, pack_id, user_id, step, filename, _mime_type(filename),
+             base64.b64encode(data).decode("ascii"), len(data), sort_order, now()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"id": file_id, "step_key": step, "filename": filename,
+            "mime_type": _mime_type(filename), "size_bytes": len(data),
+            "sort_order": sort_order}
+
+
 def _generate(pack_id: str, user_id: str, opportunity_id: str, kind: str,
               requested: list[str]) -> None:
     conn = store.connect()
@@ -328,24 +413,101 @@ def _generate(pack_id: str, user_id: str, opportunity_id: str, kind: str,
         _fail(pack_id, f"Upload your {kind} CV first.")
         return
     try:
+        used: set[str] = set()
+        saved: list[dict] = []
+        order = 0
+        _update_progress(pack_id, user_id, "research", 4,
+                         "Opening the live advert and finding official supporting material.")
+        _check_cancelled(pack_id, user_id)
         research = collect_application_research(user_id, opportunity, kind)
-        requirements = _plan_application(user_id, profile, opportunity, research, requested)
         applicant = _applicant(profile)
         page_system = page_system_for(opportunity)
+
+        source_name = "Research/Research Sources and Links.docx"
+        source_data = sources_doc(research.get("sources", []), opportunity)
+        _validate_docx(source_data, "Research sources")
+        order += 1; saved.append(_save_file(pack_id, user_id, "research", source_name,
+                                            source_data, order, used))
+
+        advert_name = "Job Materials/Job Advertisement Snapshot.docx"
+        advert_data = job_doc(opportunity, research.get("advert_text", ""))
+        _validate_docx(advert_data, "Job advertisement")
+        order += 1; saved.append(_save_file(pack_id, user_id, "research", advert_name,
+                                            advert_data, order, used))
+        order += 1; saved.append(_save_file(
+            pack_id, user_id, "research", "Job Materials/Job Advertisement Snapshot.pdf",
+            webpage_pdf(
+                f"{opportunity.get('title')} at {opportunity.get('org')}",
+                opportunity.get("url", ""), research.get("advert_text", ""), now(),
+                page_system=page_system,
+            ), order, used,
+        ))
+
+        total_attachment_bytes = 0
+        for attachment in research.get("attachments", []):
+            _check_cancelled(pack_id, user_id)
+            if total_attachment_bytes + len(attachment["data"]) > MAX_PACK_ATTACHMENTS_BYTES:
+                break
+            folder = ("Job Materials" if "job" in attachment.get("kind", "").lower()
+                      else "Research")
+            order += 1; saved.append(_save_file(
+                pack_id, user_id, "research",
+                f"{folder}/{_safe_name(attachment['filename'])}", attachment["data"], order, used,
+            ))
+            total_attachment_bytes += len(attachment["data"])
+
+        for index, source in enumerate(research.get("sources", []), 1):
+            _check_cancelled(pack_id, user_id)
+            if (not source.get("text") or
+                    source.get("kind") in {"official PDF", "research PDF", "job attachment"}):
+                continue
+            pdf = webpage_pdf(
+                source.get("title") or f"Research source {index}", source.get("url", ""),
+                source.get("text", ""), source.get("retrieved_at", now()),
+                page_system=page_system,
+            )
+            if total_attachment_bytes + len(pdf) > MAX_PACK_ATTACHMENTS_BYTES:
+                break
+            order += 1; saved.append(_save_file(
+                pack_id, user_id, "research",
+                f"Research/{index:02d} - {_safe_name(source.get('title'), 90)}.pdf",
+                pdf, order, used,
+            ))
+            total_attachment_bytes += len(pdf)
+
+        _update_progress(pack_id, user_id, "research", 28,
+                         f"Research complete. {len(saved)} source files are ready to download.")
+        _check_cancelled(pack_id, user_id)
+
+        _update_progress(pack_id, user_id, "requirements", 32,
+                         "Reading the advert, identifying criteria, limits and supporting evidence.")
+        requirements = _plan_application(user_id, profile, opportunity, research, requested)
+        req_name = "Application Requirements and Evidence Plan.docx"
+        req_data = requirements_doc(requirements, opportunity)
+        audits: dict[str, dict] = {req_name: _validate_docx(req_data, "Requirements plan")}
+        order += 1; saved.append(_save_file(pack_id, user_id, "requirements", req_name,
+                                            req_data, order, used))
+        _update_progress(pack_id, user_id, "requirements", 42,
+                         "Requirements and evidence plan complete.", plan=requirements)
+        _check_cancelled(pack_id, user_id)
+
+        _update_progress(pack_id, user_id, "cv", 46,
+                         "Preserving the original CV and preparing a role-specific working copy.")
         original_bytes = base64.b64decode(profile.get("cv_blob") or "")
         original_filename = profile.get("cv_filename") or "Original CV.docx"
         original_ext = original_filename.rsplit(".", 1)[-1].lower()
 
-        outputs: list[tuple[str, bytes]] = []
-        audits: dict[str, dict] = {}
-        outputs.append((f"CV/{_safe_name(original_filename)}", original_bytes))
+        order += 1; saved.append(_save_file(pack_id, user_id, "cv",
+                                            f"CV/{_safe_name(original_filename)}",
+                                            original_bytes, order, used))
 
         cv_notes = {}
         if original_ext == "docx":
             tailored, cv_notes = tailor_cv_docx(original_bytes, requirements.get("cv_edits", {}))
             cv_name = f"CV/Tailored CV - {_safe_name(opportunity.get('title'), 70)}.docx"
             audits[cv_name] = _validate_docx(tailored, "Tailored CV")
-            outputs.append((cv_name, tailored))
+            order += 1; saved.append(_save_file(pack_id, user_id, "cv", cv_name,
+                                                tailored, order, used))
         else:
             notice = (
                 "The uploaded CV was a PDF, so its exact design cannot be safely edited as a Word file. "
@@ -360,14 +522,25 @@ def _generate(pack_id: str, user_id: str, opportunity_id: str, kind: str,
             )
             cv_name = f"CV/Tailored CV Working Copy - {_safe_name(opportunity.get('title'), 60)}.docx"
             audits[cv_name] = _validate_docx(tailored, "Tailored CV working copy")
-            outputs.append((cv_name, tailored))
+            order += 1; saved.append(_save_file(pack_id, user_id, "cv", cv_name,
+                                                tailored, order, used))
             cv_notes = {"format_preserved": False,
                         "reason": "Uploaded CV was not a DOCX file."}
 
+        _update_progress(pack_id, user_id, "cv", 58,
+                         "The original and tailored CV files are ready to download.")
+        _check_cancelled(pack_id, user_id)
+
         item_by_key = {x.get("key"): x for x in requirements.get("submission_items", [])}
-        for key in DOCUMENT_ORDER:
-            if key not in requirements.get("documents", []):
-                continue
+        document_keys = [key for key in DOCUMENT_ORDER
+                         if key in requirements.get("documents", [])]
+        _update_progress(pack_id, user_id, "documents", 60,
+                         f"Writing {len(document_keys)} application document(s).")
+        for position, key in enumerate(document_keys, 1):
+            _check_cancelled(pack_id, user_id)
+            progress = 60 + int(30 * (position - 1) / max(1, len(document_keys)))
+            _update_progress(pack_id, user_id, "documents", progress,
+                             f"Writing {DOCUMENTS[key]} ({position} of {len(document_keys)}).")
             content = _draft_document(
                 user_id, key, item_by_key.get(key, {}), requirements,
                 profile, opportunity, research,
@@ -381,72 +554,31 @@ def _generate(pack_id: str, user_id: str, opportunity_id: str, kind: str,
                 page_system=page_system,
             )
             audits[filename] = _validate_docx(data, DOCUMENTS[key])
-            outputs.append((filename, data))
-
-        req_name = "Application Requirements and Evidence Plan.docx"
-        req_data = requirements_doc(requirements, opportunity)
-        audits[req_name] = _validate_docx(req_data, "Requirements plan")
-        outputs.append((req_name, req_data))
-
-        source_name = "Research/Research Sources and Links.docx"
-        source_data = sources_doc(research.get("sources", []), opportunity)
-        audits[source_name] = _validate_docx(source_data, "Research sources")
-        outputs.append((source_name, source_data))
-
-        advert_name = "Job Materials/Job Advertisement Snapshot.docx"
-        advert_data = job_doc(opportunity, research.get("advert_text", ""))
-        audits[advert_name] = _validate_docx(advert_data, "Job advertisement")
-        outputs.append((advert_name, advert_data))
-        outputs.append((
-            "Job Materials/Job Advertisement Snapshot.pdf",
-            webpage_pdf(
-                f"{opportunity.get('title')} at {opportunity.get('org')}",
-                opportunity.get("url", ""), research.get("advert_text", ""), now(),
-                page_system=page_system,
-            ),
-        ))
-
-        total_attachment_bytes = 0
-        for attachment in research.get("attachments", []):
-            if total_attachment_bytes + len(attachment["data"]) > MAX_PACK_ATTACHMENTS_BYTES:
-                break
-            folder = ("Job Materials" if "job" in attachment.get("kind", "").lower()
-                      else "Research")
-            outputs.append((f"{folder}/{_safe_name(attachment['filename'])}", attachment["data"]))
-            total_attachment_bytes += len(attachment["data"])
-
-        # Save researched HTML pages as PDFs so the evidence is usable offline.
-        for index, source in enumerate(research.get("sources", []), 1):
-            if (not source.get("text") or
-                    source.get("kind") in {"official PDF", "research PDF", "job attachment"}):
-                continue
-            pdf = webpage_pdf(
-                source.get("title") or f"Research source {index}", source.get("url", ""),
-                source.get("text", ""), source.get("retrieved_at", now()),
-                page_system=page_system,
-            )
-            if total_attachment_bytes + len(pdf) > MAX_PACK_ATTACHMENTS_BYTES:
-                break
-            outputs.append((
-                f"Research/{index:02d} - {_safe_name(source.get('title'), 90)}.pdf", pdf
-            ))
-            total_attachment_bytes += len(pdf)
+            order += 1; saved.append(_save_file(pack_id, user_id, "documents", filename,
+                                                data, order, used))
+            finished_progress = 60 + int(32 * position / max(1, len(document_keys)))
+            _update_progress(pack_id, user_id, "documents", finished_progress,
+                             f"{DOCUMENTS[key]} is ready. Continuing with the remaining documents.")
 
         public_sources = [public_source(s) for s in research.get("sources", [])]
+        _update_progress(pack_id, user_id, "review", 95,
+                         "Checking file integrity and preparing the final review information.")
         manifest = {
             "generated_at": now(), "profile_kind": kind,
-            "package_name": pack_filename(opportunity),
+            "workspace_name": f"{opportunity.get('title')} at {opportunity.get('org')}",
             "opportunity": {k: opportunity.get(k) for k in
                             ("id", "title", "org", "department", "location", "deadline", "url")},
             "requirements": requirements, "cv_tailoring": cv_notes,
             "document_audits": audits, "source_count": len(public_sources),
             "downloaded_attachment_count": len(research.get("attachments", [])),
+            "files": [{k: item[k] for k in ("filename", "step_key", "size_bytes")}
+                      for item in saved],
             "review_notice": (
                 "The applicant must verify every claim, date, name, requirement and live source "
                 "before submission."
             ),
         }
-        readme = f"""APPLICATION PACK
+        readme = f"""APPLICATION WORKSPACE
 {opportunity.get('title')} at {opportunity.get('org')}
 
 START HERE
@@ -464,35 +596,45 @@ was PDF, upload a DOCX version in Opportunity Finder for format-preserving tailo
 AI NOTICE
 AI-assisted drafts require human review. Do not submit unsupported or inaccurate claims.
 """
-        zip_buffer = io.BytesIO()
-        used: set[str] = set()
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as archive:
-            for path, data in outputs:
-                archive.writestr(_unique_path(path, used), data)
-            archive.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
-            archive.writestr("README FIRST.txt", readme)
+        order += 1; saved.append(_save_file(pack_id, user_id, "review", "README FIRST.txt",
+                                            readme.encode("utf-8"), order, used))
+        order += 1; saved.append(_save_file(
+            pack_id, user_id, "review", "manifest.json",
+            json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8"), order, used,
+        ))
 
         conn = store.connect()
         try:
             conn.execute(
                 """UPDATE application_packs SET status='ready',documents_json=?,sources_json=?,
-                   zip_blob=?,completed_at=?,error=NULL WHERE id=? AND user_id=?""",
-                (json.dumps([path for path, _ in outputs]), json.dumps(public_sources),
-                 base64.b64encode(zip_buffer.getvalue()).decode("ascii"),
-                 now(), pack_id, user_id),
+                   progress=100,current_step='review',step_message=?,updated_at=?,completed_at=?,
+                   error=NULL WHERE id=? AND user_id=?""",
+                (json.dumps([item["filename"] for item in saved]), json.dumps(public_sources),
+                 f"Complete. {len(saved)} files are ready for individual download.",
+                 now(), now(), pack_id, user_id),
             )
             conn.commit()
         finally:
             conn.close()
+    except PackCancelled:
+        existing = get_pack(user_id, pack_id) or {}
+        _update_progress(pack_id, user_id, existing.get("current_step") or "research",
+                         existing.get("progress") or 0,
+                         "Generation stopped. Files completed before cancellation remain available.",
+                         status="cancelled", completed=True)
     except Exception as exc:
-        _fail(pack_id, f"{type(exc).__name__}: {exc}")
+        _fail(pack_id, f"{type(exc).__name__}: {exc}", user_id=user_id)
 
 
-def _fail(pack_id: str, error: str) -> None:
+def _fail(pack_id: str, error: str, user_id: str | None = None) -> None:
     conn = store.connect()
     try:
-        conn.execute("UPDATE application_packs SET status='failed',error=?,completed_at=? WHERE id=?",
-                     (error[:1200], now(), pack_id))
+        where = "id=? AND user_id=?" if user_id else "id=?"
+        params = (error[:1200], error[:1200], now(), now(), pack_id, user_id) if user_id else \
+                 (error[:1200], error[:1200], now(), now(), pack_id)
+        conn.execute(
+            f"""UPDATE application_packs SET status='failed',error=?,step_message=?,
+                updated_at=?,completed_at=? WHERE {where}""", params)
         conn.commit()
     finally:
         conn.close()
@@ -504,9 +646,11 @@ def start_pack(user_id: str, opportunity_id: str, kind: str, documents: list[str
     try:
         conn.execute(
             """INSERT INTO application_packs
-               (id,user_id,opportunity_id,profile_kind,status,created_at)
-               VALUES (?,?,?,?,?,?)""",
-            (pack_id, user_id, opportunity_id, kind, "working", now()),
+               (id,user_id,opportunity_id,profile_kind,status,progress,current_step,
+                step_message,cancel_requested,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+            (pack_id, user_id, opportunity_id, kind, "working", 2, "research",
+             "Preparing the application workspace.", 0, now(), now()),
         )
         conn.commit()
     finally:
@@ -521,7 +665,8 @@ def start_pack(user_id: str, opportunity_id: str, kind: str, documents: list[str
 def get_pack(user_id: str, pack_id: str, include_blob: bool = False) -> dict | None:
     fields = ("*" if include_blob else
               "id,user_id,opportunity_id,profile_kind,status,documents_json,sources_json,"
-              "error,created_at,completed_at")
+              "error,progress,current_step,step_message,plan_json,cancel_requested,"
+              "created_at,updated_at,completed_at")
     conn = store.connect()
     try:
         row = conn.execute(f"SELECT {fields} FROM application_packs WHERE id=? AND user_id=?",
@@ -531,10 +676,74 @@ def get_pack(user_id: str, pack_id: str, include_blob: bool = False) -> dict | N
     return dict(row) if row else None
 
 
+def list_pack_files(user_id: str, pack_id: str) -> list[dict]:
+    conn = store.connect()
+    try:
+        rows = conn.execute(
+            """SELECT id,step_key,filename,mime_type,size_bytes,sort_order,created_at
+               FROM application_pack_files WHERE pack_id=? AND user_id=?
+               ORDER BY sort_order,created_at""", (pack_id, user_id),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in rows]
+
+
+def get_pack_file(user_id: str, pack_id: str, file_id: str) -> dict | None:
+    conn = store.connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM application_pack_files WHERE id=? AND pack_id=? AND user_id=?",
+            (file_id, pack_id, user_id),
+        ).fetchone()
+    finally:
+        conn.close()
+    return dict(row) if row else None
+
+
+def list_packs(user_id: str, limit: int = 60) -> list[dict]:
+    conn = store.connect()
+    try:
+        rows = conn.execute(
+            """SELECT p.id,p.opportunity_id,p.profile_kind,p.status,p.progress,p.current_step,
+                      p.step_message,p.error,p.created_at,p.updated_at,p.completed_at,
+                      o.title,o.org,o.location,o.deadline,
+                      (SELECT COUNT(*) FROM application_pack_files f WHERE f.pack_id=p.id) AS file_count
+               FROM application_packs p LEFT JOIN opportunities o ON o.id=p.opportunity_id
+               WHERE p.user_id=? ORDER BY p.created_at DESC LIMIT ?""",
+            (user_id, limit),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(row) for row in rows]
+
+
+def request_cancel(user_id: str, pack_id: str) -> bool:
+    conn = store.connect()
+    try:
+        row = conn.execute(
+            "SELECT status FROM application_packs WHERE id=? AND user_id=?",
+            (pack_id, user_id),
+        ).fetchone()
+        if not row or row["status"] != "working":
+            return False
+        conn.execute(
+            """UPDATE application_packs SET cancel_requested=1,step_message=?,updated_at=?
+               WHERE id=? AND user_id=?""",
+            ("Stopping after the current operation. Completed files will be kept.",
+             now(), pack_id, user_id),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
 def get_pack_opportunity(pack: dict) -> dict | None:
     conn = store.connect()
     try:
-        row = conn.execute("SELECT title,org FROM opportunities WHERE id=?",
+        row = conn.execute("""SELECT title,org,department,location,country,deadline,url,career_track
+                              FROM opportunities WHERE id=?""",
                            (pack.get("opportunity_id"),)).fetchone()
     finally:
         conn.close()

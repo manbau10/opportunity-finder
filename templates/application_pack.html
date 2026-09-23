@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#176b58">
+  <title>{{ opportunity.title or 'Application workspace' }} · Opportunity Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="workspace-page">
+<header class="topbar">
+  <a class="brand brand-link" href="{{ url_for('index') }}">
+    <div class="mark">OF</div>
+    <div><h1>Opportunity Finder</h1><p class="sub">Application workspace</p></div>
+  </a>
+  <div class="topbar-right">
+    <a class="btn" href="{{ url_for('applications_page') }}">My applications</a>
+    <a class="btn ghost" href="{{ url_for('index', track=pack.profile_kind) }}">Back to jobs</a>
+  </div>
+</header>
+
+<main class="workspace-shell">
+  <section class="workspace-hero">
+    <div class="workspace-breadcrumb">{{ pack.profile_kind | title }} application</div>
+    <div class="workspace-title-row">
+      <div>
+        <h2>{{ opportunity.title or 'Application workspace' }}</h2>
+        <p>{{ opportunity.org or 'Organisation' }}{% if opportunity.location %} · {{ opportunity.location }}{% endif %}</p>
+      </div>
+      <span class="workspace-status status-{{ pack.status }}" id="statusBadge">{{ pack.status | title }}</span>
+    </div>
+    <div class="workspace-meta">
+      {% if opportunity.deadline %}<span>Deadline {{ opportunity.deadline }}</span>{% endif %}
+      {% if opportunity.url %}<a href="{{ opportunity.url }}" target="_blank" rel="noopener">Open original advert ↗</a>{% endif %}
+    </div>
+
+    <div class="overall-progress">
+      <div class="progress-copy"><strong id="progressLabel">Preparing your workspace</strong><span id="progressPercent">{{ pack.progress or 0 }}%</span></div>
+      <div class="progress-track" role="progressbar" aria-label="Application generation progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ pack.progress or 0 }}" id="progressTrack">
+        <span id="progressBar" style="width:{{ pack.progress or 0 }}%"></span>
+      </div>
+      <p id="progressMessage">{{ pack.step_message or 'Starting application research.' }}</p>
+    </div>
+  </section>
+
+  <section class="workspace-note" id="leaveNote">
+    <span class="live-dot"></span>
+    <div><strong>You can leave this page.</strong> Work continues on the server, and this workspace will be available under My applications when you return.</div>
+  </section>
+
+  <section class="step-list" id="stepList">
+    {% for step in steps %}
+    <article class="step-card waiting" data-step="{{ step.key }}">
+      <div class="step-marker"><span class="step-number">{{ loop.index }}</span><span class="step-check">✓</span></div>
+      <div class="step-content">
+        <div class="step-heading">
+          <div><p class="step-kicker">Step {{ loop.index }}</p><h3>{{ step.label }}</h3></div>
+          <span class="step-state">Waiting</span>
+        </div>
+        <p class="step-description">{{ step.description }}</p>
+        <div class="step-files" data-files="{{ step.key }}"></div>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+
+  <section class="workspace-finish" id="finishPanel" hidden>
+    <div><p class="eyebrow">Application workspace complete</p><h3>Download only the files you need</h3>
+      <p>Each document remains available above. Review every claim, requirement and word limit before submitting.</p></div>
+    <a class="btn primary" href="{{ url_for('applications_page') }}">View all applications</a>
+  </section>
+
+  <section class="workspace-error" id="errorPanel" hidden>
+    <div><h3>Generation needs attention</h3><p id="errorText"></p>
+      <p>Files already completed are still available in the steps above.</p></div>
+    <button class="btn primary" id="retryBtn">Start a new attempt</button>
+  </section>
+
+  <div class="workspace-actions">
+    <button class="btn ghost danger-text" id="cancelBtn" {% if pack.status != 'working' %}hidden{% endif %}>Stop generation</button>
+    <span id="lastUpdated" class="tiny muted"></span>
+  </div>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+<script>window.PACK_WORKSPACE={{ {'id': pack.id, 'csrf': csrf} | tojson }};</script>
+<script src="{{ url_for('static', filename='pack.js') }}"></script>
+</body>
+</html>
