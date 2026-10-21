@@ -143,7 +143,8 @@ def _json_errors_for_api(error):
             error.code, error.description or "Request failed.")
         return jsonify({"error": message}), error.code
     app.logger.exception("Unhandled error in %s", request.path)
-    return jsonify({"error": "The server hit an unexpected problem. Please try again."}), 500
+    return jsonify({"error": "The server hit an unexpected problem. Please try again.",
+                    "type": type(error).__name__}), 500
 
 
 @app.before_request
