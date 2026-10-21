@@ -25,5 +25,19 @@ services:
         generateValue: true
       - key: API_ENCRYPTION_KEY
         generateValue: true
+      - key: INVITE_CODE          # optional: set it to limit sign-up to people you invite
+        sync: false
+      - key: JOOBLE_API_KEY       # optional job APIs; leave blank to keep them off
+        sync: false
+      - key: USAJOBS_API_KEY
+        sync: false
+      - key: USAJOBS_EMAIL
+        sync: false
+      - key: REED_API_KEY
+        sync: false
+      - key: ADZUNA_APP_ID
+        sync: false
+      - key: ADZUNA_APP_KEY
+        sync: false
       - key: REFRESH_TOKEN        # copy this value into the GitHub secret REFRESH_TOKEN
         generateValue: true

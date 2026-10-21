@@ -413,3 +413,17 @@ class AccountTest(unittest.TestCase):
         limiter = RateLimiter(limit=3, window=60)
         self.assertEqual([limiter.allow("a") for _ in range(4)], [True, True, True, False])
         self.assertTrue(limiter.allow("b"))
+
+
+class InviteTest(unittest.TestCase):
+    def test_invite_code_gates_sign_up(self):
+        import re
+        from app import app
+        c = app.test_client()
+        tok = re.search(r'name="csrf_token" value="([^"]+)"', c.get("/register").get_data(as_text=True)).group(1)
+        form = {"csrf_token": tok, "name": "Invited Person", "email": "inv@example.invalid",
+                "password": "a-long-test-password-1", "accept_terms": "1"}
+        with patch.dict(os.environ, {"INVITE_CODE": "friends-2026"}):
+            self.assertIn(b"Invite code", c.get("/register").data)
+            self.assertEqual(c.post("/register", data={**form, "invite_code": "nope"}).status_code, 200)
+            self.assertEqual(c.post("/register", data={**form, "invite_code": "friends-2026"}).status_code, 302)

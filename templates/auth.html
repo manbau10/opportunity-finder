@@ -18,6 +18,9 @@
     {% if mode == 'register' %}
     <label>Full name<input name="name" required minlength="2" autocomplete="name"></label>
     {% endif %}
+    {% if mode == 'register' and invite_required %}
+    <label>Invite code<input name="invite_code" required autocomplete="off"></label>
+    {% endif %}
     <label>Email address<input type="email" name="email" required autocomplete="email"></label>
     <label>Password<input type="password" name="password" required minlength="10"
       autocomplete="{{ 'new-password' if mode == 'register' else 'current-password' }}"></label>

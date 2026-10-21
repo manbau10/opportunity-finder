@@ -257,9 +257,15 @@ def register():
         auth.verify_csrf()
         if not AUTH_LIMIT.allow("register:" + _client_ip()):
             return _too_many_attempts()
+        required = os.environ.get("INVITE_CODE", "").strip()
+        if required and not secrets.compare_digest(request.form.get("invite_code", "").strip(), required):
+            flash("Sign-up is by invitation. Enter the invite code you were given.", "error")
+            return render_template("auth.html", mode="register", csrf=auth.csrf_token(),
+                                   invite_required=True)
         if not request.form.get("accept_terms"):
             flash("Please accept the Terms of Use and Privacy Policy to create an account.", "error")
-            return render_template("auth.html", mode="register", csrf=auth.csrf_token())
+            return render_template("auth.html", mode="register", csrf=auth.csrf_token(),
+                           invite_required=bool(os.environ.get("INVITE_CODE", "").strip()))
         user, error = auth.register_user(request.form.get("name", ""),
                                          request.form.get("email", ""),
                                          request.form.get("password", ""))
@@ -268,7 +274,8 @@ def register():
         else:
             auth.begin_session(user)
             return redirect(url_for("profile_page"))
-    return render_template("auth.html", mode="register", csrf=auth.csrf_token())
+    return render_template("auth.html", mode="register", csrf=auth.csrf_token(),
+                           invite_required=bool(os.environ.get("INVITE_CODE", "").strip()))
 
 
 @app.route("/login", methods=["GET", "POST"])

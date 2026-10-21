@@ -155,3 +155,24 @@ the sleeping delay; you do not need it.
 
 **If the deploy fails.** The Render service page has a **Logs** tab, and the
 error is almost always in the last twenty lines. Paste those back to me.
+
+
+---
+
+## Inviting testers and switching on the job APIs
+
+In Render, open the service, go to **Environment** and add any of these, then save (Render
+redeploys by itself):
+
+| Variable | Purpose | Where to get it (free) |
+|---|---|---|
+| `INVITE_CODE` | Anyone signing up must enter this code. Share it only with people you invite. | Choose any phrase |
+| `JOOBLE_API_KEY` | About 70 countries | jooble.org/api/about (register for a key) |
+| `USAJOBS_API_KEY` and `USAJOBS_EMAIL` | US federal jobs (the email is the one you registered with) | developer.usajobs.gov |
+| `REED_API_KEY` | UK, full descriptions | reed.co.uk/developers |
+| `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` | 19 countries | developer.adzuna.com |
+
+The **Job sources** page in the app shows each source and how many postings it has returned,
+so you can see at once whether a key worked. Keys live only in Render's environment; never
+put them in GitHub. Also set `OPERATOR_NAME` and `CONTACT_EMAIL` so the Terms and Privacy
+pages name you.
