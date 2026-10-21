@@ -163,7 +163,9 @@ def rebuild_matches(user_id: str, kind: str) -> int:
     conn = store.connect()
     try:
         rows = conn.execute(
-            "SELECT * FROM opportunities WHERE career_track=?", (kind,)
+            "SELECT id,title,org,department,location,country,days_left,"
+            "substr(description,1,6000) AS description "
+            "FROM opportunities WHERE career_track=?", (kind,)
         ).fetchall()
         current = conn.execute(
             "SELECT opportunity_id,status FROM user_matches WHERE user_id=? AND profile_kind=?",

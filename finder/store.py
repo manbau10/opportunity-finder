@@ -68,23 +68,6 @@ def _migrate(conn: db.Connection) -> None:
     if pack_changed:
         conn.commit()
     conn.execute("CREATE INDEX IF NOT EXISTS idx_track ON opportunities(career_track)")
-    # Correct previously stored aggregator deadlines when the advert text
-    # contains a more specific application closing date.
-    from .enrich import explicit_deadline
-    repaired = False
-    rows = conn.execute(
-        "SELECT id,deadline,description FROM opportunities WHERE enriched=1 "
-        "AND description IS NOT NULL AND (deadline IS NULL OR deadline='' OR days_left IS NULL "
-        "OR days_left>=0)"
-    ).fetchall()
-    for row in rows:
-        stated = explicit_deadline((row["description"] or "")[:20000])
-        if stated and stated != (row["deadline"] or ""):
-            conn.execute("UPDATE opportunities SET deadline=? WHERE id=?", (stated, row["id"]))
-            repaired = True
-    conn.commit()
-    if repaired:
-        recompute_days_left(conn)
 
 
 def _enc(value):
@@ -122,14 +105,14 @@ def upsert_many(conn: db.Connection, items: Iterable[dict]) -> tuple[int, int]:
             cur.execute(
                 """UPDATE opportunities SET
                        title=?, org=?, department=?, location=?, country=?,
-                       country_tier=?, description=?, posted=?, deadline=?,
+                       country_tier=?, description=CASE WHEN length(COALESCE(?,'')) >= length(COALESCE(description,'')) THEN ? ELSE description END, posted=?, deadline=?,
                        days_left=?, role_key=?, role_label=?, score=?,
                        matched_terms=?, flags=?, positives=?, breakdown=?,
                        enriched=?, last_seen=?
                    WHERE id=?""",
                 (item.get("title"), item.get("org"), item.get("department"),
                  item.get("location"), item.get("country"), item.get("country_tier"),
-                 item.get("description"), item.get("posted"), item.get("deadline"),
+                 item.get("description"), item.get("description"), item.get("posted"), item.get("deadline"),
                  item.get("days_left"), item.get("role_key"), item.get("role_label"),
                  item.get("score"),
                  _enc(item.get("matched_terms") or []),
@@ -162,7 +145,11 @@ def _upsert_many_postgres(conn: db.Connection, items: list[dict]) -> tuple[int, 
         "breakdown", "enriched", "last_seen",
         "career_track",
     ]
-    update_sql = ",".join(f"{field}=EXCLUDED.{field}" for field in mutable)
+    update_sql = ",".join(
+        "description=CASE WHEN length(COALESCE(EXCLUDED.description,'')) >= "
+        "length(COALESCE(opportunities.description,'')) THEN EXCLUDED.description "
+        "ELSE opportunities.description END" if field == "description"
+        else f"{field}=EXCLUDED.{field}" for field in mutable)
     width = len(FIELDS)
     for start in range(0, len(items), 200):
         chunk = items[start:start + 200]
@@ -223,7 +210,8 @@ def log_refresh(conn, started, finished, found, added, updated, log_text, ok=Tru
 
 def last_refresh(conn) -> dict | None:
     row = conn.execute(
-        "SELECT * FROM refreshes WHERE ok = 1 ORDER BY id DESC LIMIT 1").fetchone()
+        "SELECT id, started, finished, found, added, updated, ok "
+        "FROM refreshes WHERE ok = 1 ORDER BY id DESC LIMIT 1").fetchone()
     return dict(row) if row else None
 
 

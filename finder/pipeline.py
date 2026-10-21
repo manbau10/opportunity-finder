@@ -66,12 +66,23 @@ def _enriched_ids() -> set[str]:
 
 
 def _carry_forward(items: list[dict]) -> None:
-    """Keep detail we already fetched when a listing re-serves a posting."""
+    """Keep detail we already fetched when a listing re-serves a posting.
+
+    Only the small fields are read back. The stored advert text is protected by the
+    save itself (a shorter snippet never replaces a longer stored advert), so nothing
+    large has to travel from the database on every refresh.
+    """
+    ids = [item["id"] for item in items]
+    known: dict[str, dict] = {}
     conn = store.connect()
     try:
-        known = {r["id"]: r for r in conn.execute(
-            "SELECT id, deadline, posted, location, description "
-            "FROM opportunities WHERE enriched = 1").fetchall()}
+        for start in range(0, len(ids), 400):
+            chunk = ids[start:start + 400]
+            marks = ",".join("?" for _ in chunk)
+            for row in conn.execute(
+                    "SELECT id, deadline, posted, location FROM opportunities "
+                    "WHERE enriched = 1 AND id IN (%s)" % marks, chunk).fetchall():
+                known[row["id"]] = row
     finally:
         conn.close()
     for item in items:
@@ -81,8 +92,6 @@ def _carry_forward(items: list[dict]) -> None:
         for field in ("deadline", "posted", "location"):
             if row[field] and not item.get(field):
                 item[field] = row[field]
-        if len(row["description"] or "") > len(item.get("description") or ""):
-            item["description"] = row["description"]
         item["enriched"] = 1
 
 

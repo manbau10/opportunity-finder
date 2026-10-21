@@ -363,7 +363,12 @@ def api_opportunities():
     conn = store.connect()
     try:
         rows = conn.execute(
-            """SELECT o.*,m.score AS user_score,m.matched_terms AS user_terms,
+            """SELECT o.id,o.source,o.source_key,o.title,o.org,o.department,o.location,
+                      o.country,o.country_tier,o.url,o.posted,o.deadline,o.days_left,
+                      o.role_key,o.role_label,o.flags,o.positives,o.query,o.enriched,
+                      o.first_seen,o.last_seen,o.career_track,
+                      substr(o.description,1,240) AS description,
+                      m.score AS user_score,m.matched_terms AS user_terms,
                       m.breakdown AS user_breakdown,m.status AS user_status
                FROM user_matches m JOIN opportunities o ON o.id=m.opportunity_id
                WHERE %s ORDER BY %s LIMIT ?"""

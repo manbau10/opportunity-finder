@@ -208,8 +208,9 @@ def get_profile(user_id: str, kind: str, include_text: bool = False,
     # Always fetch the extracted text so profiles created before occupational
     # classification was introduced can be upgraded transparently.
     fields = (
-        "id,user_id,kind,cv_filename,cv_mime,cv_sha256,cv_text,profile_json,"
-        "created_at,updated_at" + (",cv_blob" if include_blob else "")
+        "id,user_id,kind,cv_filename,cv_mime,cv_sha256,profile_json,"
+        "created_at,updated_at" + (",cv_text" if include_text else "")
+        + (",cv_blob" if include_blob else "")
     )
     conn = store.connect()
     try:
@@ -226,6 +227,14 @@ def get_profile(user_id: str, kind: str, include_text: bool = False,
     current = result["profile"]
     if (not current.get("primary_domain")
             or current.get("extractor_version") != PROFILE_VERSION):
+        if "cv_text" not in result:             # only an outdated profile needs the CV text
+            conn = store.connect()
+            try:
+                found = conn.execute("SELECT cv_text FROM user_profiles WHERE id=? AND user_id=?",
+                                     (result["id"], user_id)).fetchone()
+            finally:
+                conn.close()
+            result["cv_text"] = (found["cv_text"] if found else "") or ""
         rebuilt = build_profile(result.get("cv_text") or "", kind)
         # Whatever the person typed on the CV page is theirs and is kept.
         rebuilt["preferred_locations"] = current.get("preferred_locations") or []

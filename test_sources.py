@@ -321,3 +321,17 @@ class ResearchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class StorageTest(unittest.TestCase):
+    def test_short_listing_snippet_never_replaces_a_long_stored_advert(self):
+        from finder import store
+        item = ind.make_item("S", "k", "Civil Engineer", "O", "L", "https://u/keep", "x" * 5000)
+        conn = store.connect()
+        store.upsert_many(conn, [item])
+        short = dict(item, description="short snippet")
+        store.upsert_many(conn, [short])
+        row = conn.execute("SELECT length(description) AS n FROM opportunities WHERE id=?",
+                           (item["id"],)).fetchone()
+        conn.close()
+        self.assertEqual(row["n"], 5000)
