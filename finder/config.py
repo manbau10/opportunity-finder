@@ -4,13 +4,13 @@
 import os
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(BASE_DIR, "data")
+DATA_DIR = os.environ.get("OPPFINDER_DATA_DIR") or os.path.join(BASE_DIR, "data")
 DB_PATH = os.path.join(DATA_DIR, "opportunities.db")
 
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/122.0 Safari/537.36")
-REQUEST_TIMEOUT = 40
-POLITE_DELAY = 0.7          # seconds between requests to the same host
+REQUEST_TIMEOUT = 25
+POLITE_DELAY = 0.45         # seconds between requests to the same host
 
 # Search phrases sent to the keyword-driven sources. Kept deliberately broad;
 # the scorer does the fine filtering afterwards.
@@ -70,14 +70,12 @@ CRAWL_KEEP_TERMS = [
 
 # How many result pages to pull per source per refresh.
 #
-# euraxess_pages is 1 on purpose: EURAXESS paginates in JavaScript, so ?page=N
-# returns the same first page over HTTP. We therefore take its 10 newest
-# postings each day, which is why running the refresh daily matters for
-# European coverage.
+# EURAXESS is walked newest-first, ten postings per page, so 60 pages reach
+# back roughly the last week or two of European research posts.
 LIMITS = {
     "jobs_ac_uk_pages": 3,       # 25 results per page, per query
-    "euraxess_pages": 1,         # see note above
-    "detail_fetch_max": 140,     # detail pages fetched per refresh, for deadlines
+    "euraxess_pages": 60,        # ten postings per page, newest first
+    "detail_fetch_max": 300,     # detail pages fetched per refresh, for deadlines
     "detail_min_score": 40,      # only open adverts scoring at least this
 }
 
@@ -89,5 +87,9 @@ SOURCES_ENABLED = {
     "chronicle": True,    # Chronicle of Higher Education - US / Canada
     "jobsacuk": True,     # jobs.ac.uk - UK and international
     "euraxess": True,     # EURAXESS - Europe
+    "insidehighered": True,   # Inside Higher Ed Careers - US
+    "sciencecareers": True,   # Science Careers (AAAS) - sciences, global
+    "ajo": True,              # AcademicJobsOnline - US / Canada
+    "academictransfer": True, # AcademicTransfer - Netherlands
     "fellowships": True,  # curated register of named fellowship schemes
 }

@@ -7,7 +7,7 @@
 <main class="settings-shell"><div class="page-intro"><h2>Connect your AI key</h2>
 <p>You do not need to understand APIs. Choose where your key came from, paste it once, then use <b>Save and test</b>. Keys are encrypted before storage and are never returned to your browser.</p></div>
 <section class="settings-card provider-guide" id="poeGuide">
-  <div class="eyebrow">Recommended for your Poe key</div><h2>Set up Poe in three steps</h2>
+  <div class="eyebrow">Poe setup</div><h2>Set up Poe in three steps</h2>
   <ol><li>Select <b>Poe</b> below.</li><li>Paste the key from <a href="https://poe.com/api/keys" target="_blank" rel="noopener">Poe API keys</a>. Do not paste your Poe password.</li><li>Press <b>Save and test</b>. The endpoint and recommended model are filled automatically.</li></ol>
   <p class="tiny muted">Poe uses your Poe points for API requests. Use an official Poe bot and check your points before generating a large application workspace.</p>
 </section>
@@ -36,13 +36,13 @@
 </form>
 <section class="settings-card" id="worldwideSearchGuide"><div class="eyebrow">Worldwide job coverage</div>
   <h2>Use Google results through Serper</h2>
-  <p>DuckDuckGo requires no key, but cloud-hosted searches can return limited job results. For country-by-country discovery, select <b>Serper</b>, create a separate search key at <a href="https://serper.dev/" target="_blank" rel="noopener">serper.dev</a>, paste it above, and press <b>Save and test</b>.</p>
+  <p>DuckDuckGo requires no key, but it often refuses automated searches, from cloud servers and from home connections alike. For country-by-country discovery, select <b>Serper</b>, create a separate search key at <a href="https://serper.dev/" target="_blank" rel="noopener">serper.dev</a>, paste it above, and press <b>Save and test</b>.</p>
   <p class="tiny muted">The search key is separate from your Poe AI key. Worldwide mode searches the candidate's target title across 24 markets. Preferred locations entered under CVs replace the default market list.</p>
 </section>
 <section class="settings-card"><h2>Supported providers</h2>
 <p class="tiny">AI: Poe, OpenAI, Anthropic, Google Gemini, OpenRouter, Groq, Mistral, Ollama, LM Studio and HTTPS OpenAI-compatible endpoints.</p>
 <p class="tiny">Search: DuckDuckGo without a key, or Tavily, Brave Search and Serper with your key.</p>
-<p class="tiny muted">Local Ollama and LM Studio endpoints work only when this application runs on the same computer and ALLOW_LOCAL_AI=true. A hosted Render service cannot connect to an API running on your laptop.</p></section>
+<p class="tiny muted">Local Ollama and LM Studio models work when this application runs on your own computer (nothing to switch on). A hosted service such as Render cannot reach a model running on your laptop.</p></section>
 </main>
 <script>window.APP={{ {'csrf': csrf, 'catalog': catalog} | tojson }};</script>
 <script>
@@ -56,7 +56,9 @@ searchProvider.addEventListener('change',showSearchKey);showSearchKey();
 async function save(testAfter=false){status.textContent=testAfter?'Saving securely…':'Saving…';status.className='form-status';const body=Object.fromEntries(new FormData(form));
 const r=await fetch('/api/providers',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':APP.csrf},body:JSON.stringify(body)});const d=await r.json();if(!r.ok){status.textContent=d.error||'Save failed';status.className='form-status error';return false;}
 if(!testAfter){status.textContent='Settings saved securely';status.className='form-status success';return true;}
-status.textContent='Saved. Testing AI and web search…';const tr=await fetch('/api/providers/test',{method:'POST',headers:{'X-CSRF-Token':APP.csrf}});const td=await tr.json();status.textContent=tr.ok?'AI and search connections successful — worldwide discovery is ready':(td.error||'The settings were saved, but a connection test failed');status.className='form-status '+(tr.ok?'success':'error');return tr.ok;}
+status.textContent='Saved. Testing AI and web search…';const tr=await fetch('/api/providers/test',{method:'POST',headers:{'X-CSRF-Token':APP.csrf}});const td=await tr.json();if(!tr.ok){status.textContent=td.error||'The settings were saved, but the AI connection test failed';status.className='form-status error';return false;}
+if(td.search_results>0){status.textContent='AI and web search both work. Research will use live web results.';status.className='form-status success';return true;}
+status.textContent='AI works. Web search returned nothing'+(td.search_provider==='duckduckgo'?' (DuckDuckGo often blocks automated requests)':'')+'. Research will use the advert, the organisation\u2019s official website and Wikipedia; add a Tavily, Brave or Serper key for full web research.';status.className='form-status success';return true;}
 form.addEventListener('submit',e=>{e.preventDefault();save(false);});
 document.querySelector('#saveTestProvider').onclick=()=>save(true);
 </script></body></html>

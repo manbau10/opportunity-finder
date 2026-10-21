@@ -12,9 +12,10 @@ from xml.etree import ElementTree as ET
 
 import requests
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor
 
 from .config import REQUEST_TIMEOUT, USER_AGENT
-from . import store
+from . import industry_sources, queries, store
 from .providers import get_config
 from .research import _search
 from .scoring import freshness_score, locate
@@ -46,18 +47,8 @@ def _text(value: str) -> str:
 def _item(source: str, key: str, title: str, org: str, location: str, url: str,
           description: str, posted: str = "", query: str = "",
           deadline: str = "") -> dict:
-    country, tier = locate(location, org, title, description[:500])
-    timing, _, days_left = freshness_score(posted, deadline)
-    return {
-        "id": _id(key, url, title), "source": source, "source_key": key,
-        "title": title, "org": org, "department": "", "location": location,
-        "country": country, "country_tier": tier, "url": url,
-        "description": description[:12000], "posted": posted, "deadline": deadline,
-        "days_left": days_left, "role_key": "industry", "role_label": "Industry role",
-        "score": round(35 + timing * 15), "matched_terms": [], "flags": [],
-        "positives": [], "breakdown": {}, "query": query, "enriched": 1,
-        "career_track": "industry", "status": "new",
-    }
+    return industry_sources.make_item(source, key, title, org, location, url, description,
+                                      posted, query, deadline)
 
 
 def _xml_text(node, name: str) -> str:
@@ -217,19 +208,26 @@ def _fetch_profile_web_jobs(log=print) -> list[dict]:
     found: dict[str, dict] = {}
     for domain, titles, locations, provider, key in _profile_search_specs():
         count = 0
+        refused = False
         for title in titles:
+            if refused:
+                break
             for host in WEB_JOB_HOSTS:
                 query = f'site:{host} "{title}" job'
                 try:
                     results = _search(query, provider, key, limit=8)
                 except Exception as exc:
-                    log(f"  !! {provider} web search failed for {domain}: {exc}")
+                    # An engine that refuses one query refuses the rest: stop this profile.
+                    log(f"  web search ({provider}) unavailable for {domain}: {exc}")
+                    refused = True
                     break
                 for result in results:
                     item = _direct_job_result(result, domain, query)
                     if item:
                         found[item["id"]] = item
                         count += 1
+        if refused:
+            continue
         log(f"  web search ({provider}): {domain:<22} {count:3d} direct adverts")
         # Paid/search-API providers are reliable from cloud servers and can
         # search country by country. DuckDuckGo HTML is retained as a free
@@ -255,78 +253,59 @@ def _fetch_profile_web_jobs(log=print) -> list[dict]:
     return list(found.values())
 
 
-def fetch(log=print) -> list[dict]:
-    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    found: dict[str, dict] = {}
-    try:
-        for item in _fetch_nhs(log):
-            found[item["id"]] = item
-    except Exception as exc:
-        log(f"  !! NHS Jobs nursing feed failed: {exc}")
-    try:
-        response = requests.get("https://remotive.com/api/remote-jobs",
-                                headers=headers, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        rows = response.json().get("jobs", [])[:250]
-        for row in rows:
-            item = _item("Remotive", "remotive", row.get("title", ""),
-                row.get("company_name", ""), row.get("candidate_required_location", "Remote"),
-                row.get("url", ""), _text(row.get("description", "")),
-                (row.get("publication_date") or "")[:10], "all remote professions")
-            found[item["id"]] = item
-        log(f"  remotive: {len(rows)} jobs across all professions")
-    except Exception as exc:
-        log(f"  !! Remotive failed: {exc}")
+DEFAULT_TITLES = ["project manager", "software engineer", "data analyst", "accountant",
+                  "marketing manager", "civil engineer", "teacher", "nurse"]
+NURSING_DOMAINS = {"nursing", "allied_health"}
 
+
+def _wants_nhs() -> bool:
+    """The NHS feed is nursing only, so fetch it when a nursing CV (or no CV yet) exists."""
+    conn = store.connect()
     try:
-        response = requests.get("https://www.arbeitnow.com/api/job-board-api",
-                                headers=headers, timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        rows = response.json().get("data", [])
-        for row in rows:
-            title = row.get("title", "")
-            desc = _text(row.get("description", ""))
-            stamp = row.get("created_at")
-            posted = (dt.datetime.fromtimestamp(stamp, dt.timezone.utc).date().isoformat()
-                      if isinstance(stamp, (int, float)) else str(stamp or "")[:10])
-            item = _item("Arbeitnow", "arbeitnow", title, row.get("company_name", ""),
-                         row.get("location", ""), row.get("url", ""), desc, posted, "broad crawl")
-            found[item["id"]] = item
-        log(f"  arbeitnow: {len(rows)} jobs across all professions")
-    except Exception as exc:
-        log(f"  !! Arbeitnow failed: {exc}")
-    try:
-        response = requests.get("https://jobicy.com/api/v2/remote-jobs",
-                                params={"count": 100}, headers=headers,
-                                timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        rows = response.json().get("jobs", [])
-        for row in rows:
-            item = _item("Jobicy", "jobicy", row.get("jobTitle", ""),
-                row.get("companyName", ""), row.get("jobGeo", "Remote"),
-                row.get("url", ""), _text(row.get("jobDescription") or row.get("jobExcerpt", "")),
-                (row.get("pubDate") or "")[:10], "all remote professions")
-            found[item["id"]] = item
-        log(f"  jobicy: {len(rows)} jobs across all professions")
-    except Exception as exc:
-        log(f"  !! Jobicy failed: {exc}")
-    try:
-        response = requests.get("https://remoteok.com/api", headers=headers,
-                                timeout=REQUEST_TIMEOUT)
-        response.raise_for_status()
-        rows = [row for row in response.json() if isinstance(row, dict) and row.get("position")]
-        for row in rows[:150]:
-            item = _item("Remote OK", "remoteok", row.get("position", ""),
-                row.get("company", ""), row.get("location") or "Remote",
-                row.get("url", ""), _text(row.get("description", "")),
-                (row.get("date") or "")[:10], "all remote professions")
-            found[item["id"]] = item
-        log(f"  remoteok: {min(len(rows), 150)} jobs across all professions")
-    except Exception as exc:
-        log(f"  !! Remote OK failed: {exc}")
-    try:
-        for item in _fetch_profile_web_jobs(log):
-            found[item["id"]] = item
-    except Exception as exc:
-        log(f"  !! Profile-driven web job search failed: {exc}")
+        rows = conn.execute("SELECT profile_json FROM user_profiles WHERE kind='industry'").fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return True
+    for row in rows:
+        try:
+            if json.loads(row["profile_json"] or "{}").get("primary_domain") in NURSING_DOMAINS:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def fetch(log=print) -> list[dict]:
+    """Run every industry source in parallel and merge the results."""
+    titles = queries.industry_titles() or DEFAULT_TITLES
+    log("  industry searches: %d job titles from the uploaded CVs" % len(titles))
+    jobs = [(key, fn) for key, _label, _country, fn in industry_sources.SOURCES]
+    if industry_sources.adzuna_enabled():
+        jobs.append(("adzuna", industry_sources.fetch_adzuna))
+    if _wants_nhs():
+        jobs.append(("nhs", lambda _titles, lg: _fetch_nhs(lg)))
+    jobs.append(("web", lambda _titles, lg: _fetch_profile_web_jobs(lg)))
+
+    def run(job):
+        key, fn = job
+        try:
+            return key, fn(titles, log), None
+        except Exception as exc:                       # one dead board must not stop the rest
+            return key, [], exc
+
+    found: dict[str, dict] = {}
+    seen_sigs: set[tuple] = set()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for key, rows, error in pool.map(run, jobs):
+            if error is not None:
+                log(f"  !! {key} failed: {type(error).__name__}: {error}")
+                continue
+            for item in rows:
+                sig = (item["title"].lower()[:80], item["org"].lower()[:40],
+                       item["location"].lower()[:40])
+                if item["id"] in found or sig in seen_sigs:
+                    continue
+                seen_sigs.add(sig)
+                found[item["id"]] = item
     return list(found.values())

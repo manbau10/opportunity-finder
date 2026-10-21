@@ -95,6 +95,10 @@ something fails.
    These must remain stable: changing the first signs users out and changing
    the second makes previously stored provider credentials unreadable.
 6. Click **Apply** / **Create**.
+7. Copy the generated **REFRESH_TOKEN** from the Render dashboard (Environment tab) into
+   your GitHub repository under **Settings → Secrets and variables → Actions → New
+   repository secret**, named `REFRESH_TOKEN`. The daily workflow sends it so that only
+   your scheduler, not any visitor, can start a collection.
 
 The first build takes about five minutes. When it finishes, Render shows your
 URL at the top of the service page. That link is the answer to the original

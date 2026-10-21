@@ -5,9 +5,9 @@ has separate Academic and Industry profiles, private scores and application
 tracking, encrypted bring-your-own AI/search settings, and downloadable Word
 application workspaces with staged progress and a research-source audit trail.
 
-A daily dashboard of academic posts — faculty, fellowships and postdocs — gathered
-from four job boards plus a curated fellowship register, and scored against
-Ridwan A. Taiwo's CV.
+A daily dashboard of academic posts (faculty, fellowships, postdocs) from nine academic
+sources and of industry jobs from boards in a dozen countries plus worldwide remote
+boards, each scored privately against your own CV.
 
 ---
 
@@ -79,7 +79,7 @@ list, save the ones worth a proper look.
 | **Post type tag** | Assistant Professor / Lecturer, Postdoc, Fellowship, Associate, Chair, PhD. |
 | **Deadline tag** | Days left where the advert states a closing date. Amber under 14 days. |
 | **"Matches your work on"** | The specific CV topics the advert shares with you — the reason it scored. |
-| **Dashed tags** | Warnings: adjunct contract, wrong discipline, deadline passed, outside your target countries. |
+| **Dashed tags** | Warnings: adjunct contract, PhD studentship, senior chair-level post, deadline passed. |
 
 Click any card for the full breakdown: the four sub-scores, all overlapping
 topics, the deadline, and the advert text.
@@ -92,122 +92,113 @@ come back to them.
 
 ## Where the postings come from
 
-| Source | Coverage | Method |
-|---|---|---|
-| **Times Higher Education unijobs** | UK, Australia, New Zealand, and global | Keyword RSS, one query per search phrase |
-| **Chronicle of Higher Education** | United States and Canada | Keyword RSS |
-| **jobs.ac.uk** | United Kingdom, plus European and international posts | Search-results pages |
-| **EURAXESS** | European Commission portal | Its 10 newest postings, filtered locally |
-| **Fellowship register** | All target regions | A curated list kept in the code |
+Every board is searched **at the same time**, using phrases taken from the CVs
+uploaded to the app (a nursing CV searches nursing, a civil-engineering CV
+searches civil engineering). A full refresh takes about two minutes. Open
+**Job sources** in the app to see each board, its coverage and how many postings
+it has returned.
 
-For the best-scoring postings the app then opens the advert itself to read the
-closing date, country, and full description, and re-scores with that extra
-detail. Adverts it has already read are never re-opened, so the first refresh is
-the slow one.
+**Academic boards**
 
-### Two honest limitations
+| Source | Coverage |
+|---|---|
+| Times Higher Education unijobs | UK, Australia, New Zealand and worldwide |
+| jobs.ac.uk | United Kingdom, plus Europe and international |
+| Chronicle of Higher Education | United States and Canada |
+| Inside Higher Ed Careers | United States |
+| Science Careers (AAAS) | Sciences, worldwide |
+| AcademicJobsOnline | United States and Canada |
+| AcademicTransfer | Netherlands |
+| EURAXESS | Europe (the newest ~600 postings, filtered to your subjects) |
+| Fellowship register | Named schemes: MSCA, UKRI, Banting, DECRA, Leverhulme ... |
 
-**EURAXESS gives us only its 10 newest postings per day.** Its search box and
-its pager both run in JavaScript — over plain HTTP, `?page=2` returns the same
-first page — so there is no way to walk its full listing without a headless
-browser. Running the refresh *daily* is what makes this source useful: ten new
-European postings a day accumulate, but a gap of a week is a week of European
-posts missed. The other three boards do carry European posts, so the gap is
-narrower than it sounds.
+**Industry boards, by country**
 
-**Named fellowships are not on job boards at all.** MSCA, DECRA, Banting,
-Leverhulme, UKRI Future Leaders and the rest are announced on funder websites,
-each with its own format. Rather than scrape two dozen funder sites unreliably,
-`finder/sources/fellowships.py` holds a curated register of the major recurring
-schemes you are eligible for, with the official link for each.
+| Country or region | Source |
+|---|---|
+| United Kingdom | Reed; NHS Jobs (nursing and midwifery, used when a nursing CV exists) |
+| United States | GovernmentJobs (city, county, state and federal agencies) |
+| Canada | Job Bank (Government of Canada) |
+| Sweden | Platsbanken (Arbetsformedlingen) |
+| Switzerland | jobs.ch |
+| Germany / DACH | Arbeitnow |
+| Nigeria, Ghana | Jobberman |
+| Kenya | BrighterMonday |
+| South Africa | Careers24 |
+| Remote, worldwide | Himalayas, Remotive, Jobicy (by country), Working Nomads, Remote OK |
+| 19 countries | Adzuna, switched on by setting `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` (free keys at developer.adzuna.com) |
 
-Those entries deliberately show **no deadline**. Rounds move every year, and a
-confidently wrong date would be worse than none — each entry instead states the
-month the call usually runs and links to the page that has the real date. Treat
-them as a standing checklist, not as live vacancies. They score on eligibility
-rather than on keyword overlap, since most are open to all disciplines.
+Add a Tavily, Brave or Serper key under **API settings** and industry searches also
+look through employers' own application pages (Lever, Greenhouse, Ashby, Workable,
+SmartRecruiters, Workday) country by country.
 
-Coverage is good but not exhaustive: no job board indexes every university, and
-many departments advertise only on their own pages. Treat this as a high-yield
-first pass, not the whole market.
+For adverts whose listing page shows no closing date, the app opens the advert itself to
+read the deadline, location and full text, then re-scores. Adverts already read are never
+re-opened, so each day's refresh is faster than the first.
+
+### Checking that the sources still work
+
+Job boards change their pages from time to time. This prints one line per board, OK,
+EMPTY or FAIL, with the number of postings:
+
+```bash
+python check_sources.py
+```
+
+A board that fails is one small file under `finder/sources/` or in
+`finder/industry_sources.py`; the others keep working.
+
+### Honest limitations
+
+- **Boards that block automated access are not used.** HigherEdJobs, Academic Positions,
+  Indeed, Seek, Bayt, Jooble and similar sites sit behind bot protection, and the app does
+  not try to defeat it. Where a country has no open board, add an Adzuna key or a search
+  key.
+- **Named fellowships are not on job boards.** `finder/sources/fellowships.py` holds a
+  curated register with the official link for each scheme. Entries deliberately show no
+  deadline: rounds move every year, and a confidently wrong date is worse than none.
+- **Coverage is good, not complete.** Many departments advertise only on their own pages.
+  Treat the results as a high-yield first pass over the market.
 
 ---
 
 ## How the match score is built
 
-    score = 55% subject fit + 25% post-type fit + 12% location fit + 8% timing
+Each person's score is private and is computed from their own CV:
 
-**Subject fit** compares the advert against a four-tier keyword model taken
-straight from your publication record:
+    score = 38% career-field fit + 34% subject fit + 13% post-type fit
+            + 8% location fit + 7% timing
 
-- **Tier A** — your own niche: water pipe failure, water distribution networks,
-  leak detection, infrastructure asset management, construction management,
-  modular integrated construction, predictive maintenance.
-- **Tier B** — adjacent fields you publish and teach in: civil engineering,
-  project management, BIM, digital twins, pavements, geotechnics, circular
-  economy, wastewater and sewer networks, resilience, construction safety.
-- **Tier C** — your methods: machine learning, explainable AI, LLMs, generative
-  AI, computer vision, optimisation. These count for less on their own, because
-  an AI post in another discipline is not your field.
-- **Tier D** — weak context words.
+- **Career-field fit** classifies the advert's occupation from its title first and its text
+  second. An advert whose title names a different occupation (a software engineer for a civil
+  engineer, a sales role for a nurse) is capped at a low score, however many soft-skill words
+  it shares with the CV.
+- **Subject fit** compares the advert with the subjects found in the CV: multi-word phrases
+  such as "water infrastructure", plus overlapping vocabulary.
+- **Post-type fit** (academic CVs): assistant professor, lecturer and tenure-track posts fit
+  best; fellowships and postdocs next; chairs and PhD studentships lower. Adjunct, vocational,
+  part-time and temporary teaching cover are discounted. A PhD studentship is not discounted
+  for someone who does not hold a doctorate.
+- **Location fit** uses the countries listed under CVs > *Preferred countries*. Leave it
+  blank to search worldwide.
+- **Timing** rewards recent postings and penalises deadlines that have passed or are within
+  three days. A closed post is capped at 25.
 
-Each tier saturates, so an advert that repeats one keyword cannot outscore a
-genuinely on-topic one.
-
-**Post-type fit** reflects your stage — PhD Feb 2025, first postdoc, 50 journal
-articles, h-index 21:
-
-| Post | Fit |
-|---|---|
-| Assistant Professor / Lecturer / tenure-track | 1.00 |
-| Fellowship | 0.95 |
-| Postdoc / Research Fellow | 0.88 |
-| Associate Professor / Senior Lecturer | 0.80 |
-| Chair / Full Professor / Head of School | 0.38 |
-| PhD position | 0.05 |
-
-That figure is then adjusted for contract quality: adjunct, part-time,
-sessional and community-college teaching cover are discounted; permanent and
-tenure-track posts get a small lift.
-
-**Location fit** is 1.00 for the countries you named (USA, UK, Canada,
-Australia, New Zealand, and Europe), 0.55 for elsewhere — Gulf, East Asia,
-Singapore, Hong Kong still appear, ranked lower. Postings whose country cannot
-be identified sit in between rather than being dropped.
-
-**Timing** rewards recent postings and penalises deadlines that have passed or
-are within three days.
-
-Two suppressors run last: a title from a clearly different discipline (nursing,
-literature, molecular biology…) cuts the score to roughly a fifth, and an
-advert with almost no subject overlap is halved.
+The same vacancy listed by several boards is shown once.
 
 ---
 
 ## Tuning it
 
-Everything the scorer knows lives in **`finder/profile.py`** — edit it and the
-next refresh re-scores everything:
-
-- `TIER_A` … `TIER_D` — topic terms and their weights
-- `ROLE_PATTERNS` — post types and how well each fits you
-- `ROLE_DOWNGRADES` / `ROLE_UPGRADES` — contract-quality adjustments
-- `TARGET_COUNTRIES` / `SECONDARY_COUNTRIES` — geography
-- `WEIGHTS` — the four top-level percentages
-- `CURATED_TOPIC_FLOOR` — how high the curated fellowships sit in the list
-
-To add a fellowship scheme, append an entry to `SCHEMES` in
-`finder/sources/fellowships.py`.
-
-Search phrases sent to the job boards are in **`finder/config.py`**
-(`SEARCH_QUERIES`). Add a phrase there to widen the net; add a term to
-`CRAWL_KEEP_TERMS` to keep more of the EURAXESS crawl.
-
-To re-score everything you have already collected without re-fetching:
-
-```bash
-python rescore.py
-```
+- Subjects and job titles are read from each CV. Edit the target job titles and preferred
+  countries on the **CVs** page and the matches are recalculated at once.
+- `finder/vocab.py` is the list of subjects recognised in CVs. `finder/domains.py` holds the
+  occupation patterns used by the career-field gate.
+- `finder/config.py` holds limits (pages read, adverts opened) and switches to turn a source
+  off.
+- To add a fellowship scheme, append an entry to `SCHEMES` in `finder/sources/fellowships.py`.
+- To add a job board, copy a small adapter (for example `finder/sources/ajo.py`, or a
+  `fetch_*` function in `finder/industry_sources.py`) and register it.
 
 ---
 
@@ -235,33 +226,47 @@ Unregister-ScheduledTask -TaskName "Opportunity Finder daily refresh" -Confirm:$
 
 ```
 app.py                       Flask server and JSON API
-export.py                    builds the standalone phone snapshot
+check_sources.py             live health check of every job board
 check_database.py            proves a database works before deploying
 finder/db.py                 SQLite locally, Postgres when DATABASE_URL is set
 render.yaml, Procfile        hosting configuration
-rescore.py                   re-score stored postings after editing the profile
-finder/profile.py            the CV model - topics, roles, countries, weights
-finder/config.py             search phrases, crawl limits, source switches
-finder/scoring.py            the matching engine
-finder/pipeline.py           fetch -> score -> enrich -> store
-finder/enrich.py             reads adverts for deadlines and locations
-finder/store.py              SQLite persistence
-finder/sources/              one adapter per job board
-finder/sources/fellowships.py  the curated fellowship register
-templates/, static/          the dashboard
-data/opportunities.db        your collected postings, saves and applications
+finder/queries.py            search phrases derived from the uploaded CVs
+finder/pipeline.py           fetch (in parallel) -> score -> enrich -> store
+finder/sources/              one adapter per academic job board
+finder/industry_sources.py   industry boards by country
+finder/matching.py           private per-CV matching engine
+finder/profiles.py           CV reading: text, subjects, job titles
+finder/research.py           advert, official site and source research for applications
+finder/application_pack.py   staged application workspaces and Word/PDF output
+finder/docgen.py             document builders, format-preserving CV tailoring
+templates/, static/          the web pages
+data/opportunities.db        your account, CVs, collected postings, saves, applications
+data/secret.key              created on first run; signs logins and encrypts API keys
 ```
 
-Your saves, applications and hidden items live in `data/opportunities.db`.
-Back that file up and your history travels with you.
+Back up the `data` folder and your history travels with you.
 
 ---
 
 ## If something breaks
 
-- **Browser shows nothing** — check the console window for a Python error.
-- **A source returns zero** — the refresh log names it (`!! <source> failed`).
-  Job boards change their markup; the other three keep working, and the
-  adapter for the broken one is a single file under `finder/sources/`.
-- **Missing packages** — `pip install -r requirements.txt`.
+- **Double-click does nothing, or says Python was not found** — install Python 3 from
+  python.org and tick "Add python.exe to PATH". The start file installs the packages it needs
+  on first run.
+- **Browser shows nothing** — look at the black console window for the error message.
+- **A board returns zero** — run `python check_sources.py`; the refresh log
+  (`data/refresh.log`) also names it (`!! <source> failed`).
+- **The scheduled refresh did nothing** — open `data/refresh.log`. An old version of this app
+  crashed silently when a package was missing; `daily-refresh.bat` now installs it.
+- **A workspace stopped at "working"** — if the server restarted mid-way, the workspace is
+  marked as interrupted when the app next starts; press *Start a new attempt*.
 - **Port already in use** — `python app.py --port 57001`.
+
+## Tests
+
+```bash
+python -m pytest -q
+```
+
+runs about forty offline checks (parsers for every board, matching, account isolation,
+application workspaces, CV format preservation). They use a throw-away database.

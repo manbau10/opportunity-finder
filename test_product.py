@@ -10,6 +10,9 @@ import json
 from unittest.mock import patch
 
 os.environ.setdefault("SECRET_KEY", "integration-test-secret-not-for-production")
+# Tests run on a throw-away database, never on the real data folder.
+import tempfile
+os.environ["OPPFINDER_DATA_DIR"] = tempfile.mkdtemp(prefix="oppfinder-test-")
 
 from app import app
 from finder import pipeline, store
@@ -65,6 +68,9 @@ class ProductFlowTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         app.config.update(TESTING=True, SECRET_KEY=os.environ["SECRET_KEY"])
+        # Visiting the dashboard must not start a live crawl of the job boards.
+        cls._no_crawl = patch.object(pipeline, "run_refresh_background")
+        cls._no_crawl.start()
         cleanup_test_records()
         conn = store.connect()
         store.upsert_many(conn, [sample(OPP_IDS[0], "academic"), sample(OPP_IDS[1], "industry")])
@@ -73,6 +79,7 @@ class ProductFlowTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cleanup_test_records()
+        cls._no_crawl.stop()
 
     def _register(self, email: str):
         client = app.test_client()
@@ -215,14 +222,43 @@ class ProductFlowTest(unittest.TestCase):
         self.assertIn("infrastructure management", reader.pages[0].extract_text().lower())
 
     def test_refresh_button_selects_only_the_current_track(self):
-        client = app.test_client()
+        cleanup_test_records()                 # other tests may already own this e-mail
+        client, csrf, _uid = self._register(EMAILS[0])
+        self.assertEqual(app.test_client().post("/api/refresh").status_code, 401)
         was_running = pipeline.STATE["running"]
         pipeline.STATE["running"] = False
         try:
+            self._no_crawl.stop()
             with patch.object(pipeline, "run_refresh_background") as start:
-                response = client.post("/api/refresh?track=industry")
+                response = client.post("/api/refresh?track=industry",
+                                       headers={"X-CSRF-Token": csrf})
                 self.assertEqual(response.status_code, 200)
                 start.assert_called_once_with({"industry"})
+        finally:
+            self._no_crawl.start()
+            pipeline.STATE["running"] = was_running
+            cleanup_test_records()
+            conn = store.connect()
+            store.upsert_many(conn, [sample(OPP_IDS[0], "academic"), sample(OPP_IDS[1], "industry")])
+            conn.close()
+
+    def test_scheduler_token_can_start_a_refresh_and_status_hides_the_log(self):
+        anonymous = app.test_client()
+        was_running = pipeline.STATE["running"]
+        pipeline.STATE["running"] = False
+        try:
+            with patch.dict(os.environ, {"REFRESH_TOKEN": "scheduler-secret"}),                  patch.object(pipeline, "run_refresh_background") as start:
+                self.assertEqual(anonymous.post("/api/refresh").status_code, 401)
+                self.assertEqual(anonymous.post("/api/refresh",
+                                                headers={"X-Refresh-Token": "wrong"}).status_code, 401)
+                ok = anonymous.post("/api/refresh", headers={"X-Refresh-Token": "scheduler-secret"})
+                self.assertEqual(ok.status_code, 200)
+                start.assert_called_once()
+                public = anonymous.get("/api/refresh/status").get_json()
+                self.assertNotIn("lines", public)
+                private = anonymous.get("/api/refresh/status",
+                                        headers={"X-Refresh-Token": "scheduler-secret"}).get_json()
+                self.assertIn("lines", private)
         finally:
             pipeline.STATE["running"] = was_running
 

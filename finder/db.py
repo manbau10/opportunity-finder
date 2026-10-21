@@ -276,6 +276,11 @@ def connect() -> Connection:
         return Connection(raw)
 
     os.makedirs(DATA_DIR, exist_ok=True)
-    raw = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
+    raw = sqlite3.connect(DB_PATH, timeout=60, check_same_thread=False)
     raw.row_factory = sqlite3.Row
+    # NORMAL is safe with a rollback journal and avoids an fsync per statement,
+    # which is what makes writes crawl on a synced folder such as OneDrive.
+    raw.execute("PRAGMA synchronous=NORMAL")
+    raw.execute("PRAGMA temp_store=MEMORY")
+    raw.execute("PRAGMA cache_size=-32000")
     return Connection(raw)

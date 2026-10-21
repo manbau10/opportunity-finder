@@ -101,6 +101,28 @@ def explicit_deadline(text: str) -> str:
     return min(dates) if dates else ""
 
 
+MAX_ADVERT_CHARS = 12000
+_BODY_SELECTORS = ("[itemprop=description]", ".job-description", "#job-description",
+                   ".jobdescription", ".job_description", "main", "article",
+                   "[role=main]", "#content", "#main")
+_CHROME_TAGS = ("script", "style", "noscript", "svg", "nav", "header", "footer", "aside",
+                "form", "iframe")
+
+
+def _advert_body(soup: BeautifulSoup) -> str:
+    """Text of the advert's main content, without navigation and page furniture."""
+    for selector in _BODY_SELECTORS:
+        node = soup.select_one(selector)
+        if node is not None:
+            text = clean(node.get_text(" ", strip=True))
+            if len(text) >= 400:
+                return text
+    clone = BeautifulSoup(str(soup.body or soup), "html.parser")
+    for tag in clone(list(_CHROME_TAGS)):
+        tag.decompose()
+    return clean(clone.get_text(" ", strip=True))
+
+
 def enrich(item: dict) -> bool:
     """Fill deadline / posted / location / description in place. True if changed."""
     r = get(item["url"])
@@ -128,7 +150,9 @@ def enrich(item: dict) -> bool:
             changed = True
         break
 
-    text = clean(BeautifulSoup(html, "html.parser").get_text(" ", strip=True))
+    soup = BeautifulSoup(html, "html.parser")
+    text = clean(soup.get_text(" ", strip=True))              # whole page: dates, labels
+    body = _advert_body(soup)                                  # the advert alone, no menus
 
     stated_deadline = explicit_deadline(text)
     if stated_deadline and stated_deadline != item.get("deadline"):
@@ -143,8 +167,10 @@ def enrich(item: dict) -> bool:
             item["location"] = m.group(1).strip()
             changed = True
 
-    if len(text) > len(item.get("description") or ""):
-        item["description"] = text
+    # Keep the advert itself. Whole-page text (menus, footers, "related jobs") only
+    # dilutes the match and bloats the stored description.
+    if len(body) > len(item.get("description") or ""):
+        item["description"] = body[:MAX_ADVERT_CHARS]
         changed = True
 
     item["enriched"] = 1

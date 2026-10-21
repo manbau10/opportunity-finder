@@ -16,6 +16,7 @@ import os
 import base64
 import io
 import json
+import secrets
 import sys
 import threading
 import webbrowser
@@ -24,7 +25,7 @@ from flask import (Flask, flash, g, jsonify, redirect, render_template, request,
                    send_file, session, url_for)
 
 from finder import db, pipeline, store
-from finder import auth, matching, profiles, providers
+from finder import appkey, auth, catalog, matching, profiles, providers
 from finder.application_pack import (
     WORKSPACE_STEPS, get_pack, get_pack_file, get_pack_opportunity, list_pack_files,
     list_packs, pack_filename, request_cancel, start_pack,
@@ -36,7 +37,7 @@ STALE_AFTER_HOURS = int(os.environ.get("STALE_AFTER_HOURS", "10"))
 app = Flask(__name__)
 app.config["JSON_SORT_KEYS"] = False
 app.config.update(
-    SECRET_KEY=os.environ.get("SECRET_KEY", "local-development-key-change-before-deploy"),
+    SECRET_KEY=appkey.get_secret_key(),
     MAX_CONTENT_LENGTH=profiles.MAX_CV_BYTES + 1024 * 1024,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -44,6 +45,12 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=dt.timedelta(days=14),
 )
 app.jinja_env.globals["csrf_token"] = auth.csrf_token
+
+try:
+    from finder.application_pack import recover_interrupted
+    recover_interrupted()
+except Exception as exc:                      # never block start-up on housekeeping
+    print("Could not tidy interrupted workspaces:", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -123,8 +130,27 @@ def _user_summary(conn, user_id: str, kind: str, min_score: int) -> dict:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+@app.errorhandler(Exception)
+def _json_errors_for_api(error):
+    """The pages' scripts read JSON; an HTML error page made them fail with a cryptic message."""
+    from werkzeug.exceptions import HTTPException
+    if not request.path.startswith("/api/"):
+        if isinstance(error, HTTPException):
+            return error
+        raise error
+    if isinstance(error, HTTPException):
+        message = {413: "That file is too large. CV files can be up to 6 MB."}.get(
+            error.code, error.description or "Request failed.")
+        return jsonify({"error": message}), error.code
+    app.logger.exception("Unhandled error in %s", request.path)
+    return jsonify({"error": "The server hit an unexpected problem. Please try again."}), 500
+
+
 @app.before_request
 def _load_authenticated_user():
+    if request.endpoint == "static":
+        g.user = None
+        return
     auth.load_user()
 
 
@@ -236,6 +262,19 @@ def application_workspace(pack_id):
                            csrf=auth.csrf_token())
 
 
+@app.route("/sources")
+@auth.login_required
+def sources_page():
+    return render_template("sources.html", user=g.user, sources=catalog.source_status(),
+                           csrf=auth.csrf_token())
+
+
+@app.route("/api/sources")
+@auth.login_required
+def api_sources():
+    return jsonify(catalog.source_status())
+
+
 @app.route("/healthz")
 def healthz():
     return jsonify({"ok": True, "backend": db.backend(),
@@ -250,6 +289,7 @@ def api_opportunities():
     kind = args.get("track", "academic")
     if kind not in ("academic", "industry"):
         return jsonify({"error": "unknown career track"}), 400
+    store.refresh_days_left_daily()
     user_profile = profiles.get_profile(g.user["id"], kind)
     if not user_profile:
         return jsonify({"items": [], "count": 0,
@@ -259,7 +299,13 @@ def api_opportunities():
     # release, so users do not need to upload the CV again.
     if not matching.matches_are_current(g.user["id"], kind):
         matching.rebuild_matches(g.user["id"], kind)
-    min_score = int(args.get("min_score", DISPLAY_MIN_SCORE))
+    def _int(name: str, default: int, low: int, high: int) -> int:
+        try:
+            return max(low, min(high, int(args.get(name, default))))
+        except (TypeError, ValueError):
+            return default
+
+    min_score = _int("min_score", DISPLAY_MIN_SCORE, 0, 100)
     roles = [r for r in args.get("roles", "").split(",") if r]
     countries = [c for c in args.get("countries", "").split(",") if c]
     sources = [s for s in args.get("sources", "").split(",") if s]
@@ -268,7 +314,7 @@ def api_opportunities():
     window = args.get("window", "any")           # any | today | week | month
     deadline = args.get("deadline", "live")      # live | any | soon
     sort = args.get("sort", "score")             # score | deadline | newest
-    limit = min(int(args.get("limit", 300)), 1000)
+    limit = _int("limit", 300, 1, 1000)
 
     where = ["m.user_id = ?", "m.profile_kind = ?", "m.score >= ?", "o.career_track = ?"]
     params: list = [g.user["id"], kind, min_score, kind]
@@ -320,14 +366,27 @@ def api_opportunities():
                       m.breakdown AS user_breakdown,m.status AS user_status
                FROM user_matches m JOIN opportunities o ON o.id=m.opportunity_id
                WHERE %s ORDER BY %s LIMIT ?"""
-            % (" AND ".join(where), order), params + [limit]).fetchall()
+            % (" AND ".join(where), order), params + [limit * 2]).fetchall()
         items = []
+        seen_listing: set[tuple] = set()
         for row in rows:
             item = store.decode(row)
+            # The same vacancy is often syndicated by several boards or reposted
+            # per location. Show it once, at its best-scoring appearance.
+            signature = ((item.get("title") or "").lower().strip(),
+                         (item.get("org") or "").lower().strip())
+            if signature in seen_listing and signature[0]:
+                continue
+            seen_listing.add(signature)
+            if len(items) >= limit:
+                break
             item["score"] = item.pop("user_score")
             item["status"] = item.pop("user_status")
             item["matched_terms"] = json.loads(item.pop("user_terms") or "[]")
             item["breakdown"] = json.loads(item.pop("user_breakdown") or "{}")
+            # The list view never shows the advert body; the detail drawer loads it
+            # on demand. Sending 300 full adverts made every filter click slow.
+            item["description"] = (item.get("description") or "")[:240]
             items.append(item)
         facets = {
             "countries": [dict(r) for r in conn.execute(
@@ -407,21 +466,40 @@ def api_status():
     return jsonify({"ok": True, "summary": summary})
 
 
+def _refresh_token_ok() -> bool:
+    """A scheduler (for example the GitHub Actions workflow) proves itself with a shared token."""
+    expected = os.environ.get("REFRESH_TOKEN", "").strip()
+    supplied = request.headers.get("X-Refresh-Token", "")
+    return bool(expected) and secrets.compare_digest(supplied, expected)
+
+
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
+    """Start a collection. Signed-in users (with their page token) or a scheduler token."""
+    if not _refresh_token_ok():
+        if not g.get("user"):
+            return jsonify({"error": "authentication required"}), 401
+        auth.verify_csrf()
     if pipeline.STATE["running"]:
         return jsonify({"ok": False, "message": "already running",
-                        "state": pipeline.STATE})
+                        "state": _public_state()})
     track = request.args.get("track")
     tracks = {track} if track in {"academic", "industry"} else None
     pipeline.run_refresh_background(tracks)
-    return jsonify({"ok": True, "state": pipeline.STATE})
+    return jsonify({"ok": True, "state": _public_state()})
+
+
+def _public_state() -> dict:
+    """Progress that is safe to show anyone: no log lines, which can name search subjects."""
+    state = {k: v for k, v in pipeline.STATE.items() if k != "lines"}
+    return state
 
 
 @app.route("/api/refresh/status")
 def api_refresh_status():
-    state = dict(pipeline.STATE)
-    state["lines"] = state["lines"][-40:]
+    state = _public_state()
+    if g.get("user") or _refresh_token_ok():
+        state["lines"] = pipeline.STATE["lines"][-40:]
     conn = store.connect()
     try:
         state["summary"] = _global_summary(conn)
@@ -492,15 +570,16 @@ def api_test_provider():
                                 "Test this provider configuration.", max_tokens=30)
         config = providers.get_config(g.user["id"], include_keys=True) or {}
         search_provider = config.get("search_provider", "duckduckgo")
-        search_results = None
-        if search_provider != "duckduckgo":
-            from finder.research import _search
-            search_results = len(_search(
-                'registered nurse job Canada apply', search_provider,
-                config.get("search_key", ""), limit=2))
+        from finder.research import _search
+        try:
+            search_results = len(_search("university civil engineering department courses",
+                                         search_provider, config.get("search_key", ""), limit=3))
+            search_error = ""
+        except Exception as exc:                  # the AI test passed; report search separately
+            search_results, search_error = 0, f"{type(exc).__name__}: {exc}"
         return jsonify({"ok": True, "response": answer[:200],
                         "search_provider": search_provider,
-                        "search_results": search_results})
+                        "search_results": search_results, "search_error": search_error})
     except Exception as exc:
         return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 400
 

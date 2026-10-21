@@ -55,13 +55,25 @@ class PackCancelled(Exception):
 
 def _safe_name(value: str, maximum: int = 120) -> str:
     value = re.sub(r"[^A-Za-z0-9._()& -]+", "", value or "")
-    return re.sub(r"\s+", " ", value.strip(" ."))[:maximum] or "Application"
+    value = re.sub(r"\s+", " ", value.strip(" ."))
+    if len(value) > maximum:
+        # Cut at a word boundary so a name never ends mid-word or on a dangling dash.
+        value = value[:maximum].rsplit(" ", 1)[0].rstrip(" -&,.") if " " in value[:maximum] else value[:maximum]
+    return value or "Application"
 
 
 def pack_filename(opportunity: dict) -> str:
     title = _safe_name(opportunity.get("title") or "Application", 75)
     org = _safe_name(opportunity.get("org") or "Employer", 55)
     return f"{title} at {org}.zip"
+
+
+def _pdf(*args, **kwargs) -> bytes | None:
+    """A PDF snapshot of a web page, or None if it cannot be made (the pack goes on)."""
+    try:
+        return webpage_pdf(*args, **kwargs)
+    except Exception:
+        return None
 
 
 def _extract_json(text: str) -> dict:
@@ -434,14 +446,15 @@ def _generate(pack_id: str, user_id: str, opportunity_id: str, kind: str,
         _validate_docx(advert_data, "Job advertisement")
         order += 1; saved.append(_save_file(pack_id, user_id, "research", advert_name,
                                             advert_data, order, used))
-        order += 1; saved.append(_save_file(
-            pack_id, user_id, "research", "Job Materials/Job Advertisement Snapshot.pdf",
-            webpage_pdf(
-                f"{opportunity.get('title')} at {opportunity.get('org')}",
-                opportunity.get("url", ""), research.get("advert_text", ""), now(),
-                page_system=page_system,
-            ), order, used,
-        ))
+        snapshot = _pdf(
+            f"{opportunity.get('title')} at {opportunity.get('org')}",
+            opportunity.get("url", ""), research.get("advert_text", ""), now(),
+            page_system=page_system,
+        )
+        if snapshot:
+            order += 1; saved.append(_save_file(
+                pack_id, user_id, "research", "Job Materials/Job Advertisement Snapshot.pdf",
+                snapshot, order, used))
 
         total_attachment_bytes = 0
         for attachment in research.get("attachments", []):
@@ -458,14 +471,16 @@ def _generate(pack_id: str, user_id: str, opportunity_id: str, kind: str,
 
         for index, source in enumerate(research.get("sources", []), 1):
             _check_cancelled(pack_id, user_id)
-            if (not source.get("text") or
+            if (len(source.get("text") or "") < 350 or
                     source.get("kind") in {"official PDF", "research PDF", "job attachment"}):
-                continue
-            pdf = webpage_pdf(
+                continue          # empty, redirect and stub pages are not worth a PDF
+            pdf = _pdf(
                 source.get("title") or f"Research source {index}", source.get("url", ""),
                 source.get("text", ""), source.get("retrieved_at", now()),
                 page_system=page_system,
             )
+            if not pdf:
+                continue
             if total_attachment_bytes + len(pdf) > MAX_PACK_ATTACHMENTS_BYTES:
                 break
             order += 1; saved.append(_save_file(
@@ -578,6 +593,17 @@ def _generate(pack_id: str, user_id: str, opportunity_id: str, kind: str,
                 "before submission."
             ),
         }
+        if cv_notes.get("format_preserved") is False:
+            cv_summary = "This workspace holds a labelled working copy, not an edited original."
+        else:
+            asked = cv_notes.get("replacements_requested", 0) + cv_notes.get("additions_requested", 0)
+            done = cv_notes.get("replacements_applied", 0) + cv_notes.get("additions_applied", 0)
+            cv_summary = (
+                f"Tailoring applied {done} of {asked} proposed edits"
+                + ("; compare it with the original before sending."
+                   if asked else "; the CV was left as uploaded because no safe edits were proposed.")
+                + (" Edits that could not be matched to an existing paragraph were skipped." if done < asked else "")
+            )
         readme = f"""APPLICATION WORKSPACE
 {opportunity.get('title')} at {opportunity.get('org')}
 
@@ -592,6 +618,7 @@ CV FORMATTING
 If the uploaded CV was DOCX, the tailored version is an edited copy of that file and retains its
 document design and all untouched content. The original CV is also included. If the uploaded CV
 was PDF, upload a DOCX version in Opportunity Finder for format-preserving tailoring.
+{cv_summary}
 
 AI NOTICE
 AI-assisted drafts require human review. Do not submit unsupported or inaccurate claims.
@@ -636,6 +663,33 @@ def _fail(pack_id: str, error: str, user_id: str | None = None) -> None:
             f"""UPDATE application_packs SET status='failed',error=?,step_message=?,
                 updated_at=?,completed_at=? WHERE {where}""", params)
         conn.commit()
+    finally:
+        conn.close()
+
+
+STALE_PACK_MINUTES = 20
+
+
+def recover_interrupted() -> int:
+    """Close out workspaces left 'working' by a server restart or crash.
+
+    Generation runs in a thread of the server process, so a restart kills it
+    silently. Without this the workspace page would show progress forever.
+    """
+    import datetime as dt
+    cutoff = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=STALE_PACK_MINUTES)
+              ).isoformat(timespec="seconds")
+    message = ("This workspace was interrupted when the server restarted. "
+               "Completed files are kept. Start a new attempt to finish it.")
+    conn = store.connect()
+    try:
+        cur = conn.execute(
+            """UPDATE application_packs SET status='failed',error=?,step_message=?,
+               updated_at=?,completed_at=?
+               WHERE status='working' AND COALESCE(updated_at,created_at) < ?""",
+            (message, message, now(), now(), cutoff))
+        conn.commit()
+        return cur.rowcount or 0
     finally:
         conn.close()
 

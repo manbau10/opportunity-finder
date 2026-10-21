@@ -5,3 +5,4 @@ data/*.log
 data/phone-snapshot.html
 *.docx
 .venv/
+data/secret.key

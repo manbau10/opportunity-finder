@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Job sources · Opportunity Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .src-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .src-table th, .src-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border, #e3e6e4); vertical-align: top; }
+    .src-table th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3, #6b7370); }
+    .src-table td.n { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+    .src-empty { color: var(--text-3, #6b7370); }
+    @media (max-width: 720px) { .src-table .cov { display: none; } }
+  </style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand brand-link" href="{{ url_for('index') }}"><div class="mark">OF</div><div><h1>Opportunity Finder</h1><p class="sub">Where the jobs come from</p></div></a>
+  <div class="topbar-right"><a class="btn primary" href="{{ url_for('index') }}">Find opportunities</a></div>
+</header>
+<main class="settings-shell">
+  <div class="page-intro">
+    <p class="eyebrow">Job sources</p>
+    <h2>Every board searched on each refresh</h2>
+    <p>Boards are searched with phrases taken from the CVs on this server, all at the same time. A source showing 0 postings has not returned anything yet: press <strong>Refresh now</strong> on the jobs page.</p>
+  </div>
+  {% for track, label in (('academic', 'Academic jobs'), ('industry', 'Industry jobs')) %}
+  <section class="settings-card">
+    <h2>{{ label }}</h2>
+    <table class="src-table">
+      <thead><tr><th>Source</th><th class="cov">Coverage</th><th class="n">Postings</th><th>Last seen</th></tr></thead>
+      <tbody>
+      {% for s in sources[track] %}
+        <tr>
+          <td>{% if s.url %}<a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.name }}</a>{% else %}{{ s.name }}{% endif %}</td>
+          <td class="cov">{{ s.coverage }}</td>
+          <td class="n {{ 'src-empty' if not s.postings }}">{{ s.postings }}</td>
+          <td class="{{ 'src-empty' if not s.last_seen }}">{{ s.last_seen or '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endfor %}
+  <section class="settings-card">
+    <h2>Search by country</h2>
+    <p>For wider coverage, add a Tavily, Brave or Serper key in <a href="{{ url_for('settings_page') }}">API settings</a>. Industry searches then also look across employers' own application pages in each country you list in your CV preferences.</p>
+  </section>
+</main>
+</body>
+</html>

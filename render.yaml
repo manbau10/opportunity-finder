@@ -25,3 +25,5 @@ services:
         generateValue: true
       - key: API_ENCRYPTION_KEY
         generateValue: true
+      - key: REFRESH_TOKEN        # copy this value into the GitHub secret REFRESH_TOKEN
+        generateValue: true

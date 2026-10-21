@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 import requests
 from cryptography.fernet import Fernet, InvalidToken
 
-from . import store
+from . import appkey, store
 from .auth import now
 
 AI_PRESETS = {
@@ -39,7 +39,7 @@ AI_LABELS = {
 
 
 def _fernet() -> Fernet:
-    secret = os.environ.get("API_ENCRYPTION_KEY") or os.environ.get("SECRET_KEY")
+    secret = os.environ.get("API_ENCRYPTION_KEY") or appkey.get_secret_key()
     if not secret:
         raise RuntimeError("SECRET_KEY must be configured before provider keys can be stored.")
     key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
@@ -64,11 +64,24 @@ def _validate_base_url(provider: str, value: str) -> str:
     parsed = urlparse(base)
     if parsed.scheme == "https" and parsed.netloc:
         return base
-    if (provider in {"ollama", "lmstudio"} and
-            os.environ.get("ALLOW_LOCAL_AI", "").lower() == "true" and
+    if (provider in {"ollama", "lmstudio"} and _local_ai_allowed() and
             parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}):
         return base
-    raise ValueError("AI endpoints must use HTTPS. Local endpoints require ALLOW_LOCAL_AI=true.")
+    raise ValueError("AI endpoints must use HTTPS. Local models (Ollama, LM Studio) work only "
+                     "when Opportunity Finder runs on your own computer.")
+
+
+def _local_ai_allowed() -> bool:
+    """A local model is reachable only when the app runs on the user's own machine.
+
+    Hosted deployments (Render, a Postgres database) must not let one visitor point the
+    server at its internal network, so there it stays off unless explicitly enabled.
+    """
+    flag = os.environ.get("ALLOW_LOCAL_AI", "").strip().lower()
+    if flag:
+        return flag == "true"
+    from . import db
+    return not db.IS_POSTGRES and os.environ.get("RENDER", "").lower() != "true"
 
 
 def save_config(user_id: str, data: dict) -> dict:

@@ -73,10 +73,12 @@ def _migrate(conn: db.Connection) -> None:
     from .enrich import explicit_deadline
     repaired = False
     rows = conn.execute(
-        "SELECT id,deadline,description FROM opportunities WHERE description IS NOT NULL"
+        "SELECT id,deadline,description FROM opportunities WHERE enriched=1 "
+        "AND description IS NOT NULL AND (deadline IS NULL OR deadline='' OR days_left IS NULL "
+        "OR days_left>=0)"
     ).fetchall()
     for row in rows:
-        stated = explicit_deadline(row["description"] or "")
+        stated = explicit_deadline((row["description"] or "")[:20000])
         if stated and stated != (row["deadline"] or ""):
             conn.execute("UPDATE opportunities SET deadline=? WHERE id=?", (stated, row["id"]))
             repaired = True
@@ -192,6 +194,23 @@ def recompute_days_left(conn: db.Connection) -> None:
                WHERE deadline GLOB '????-??-??'"""
         )
     conn.commit()
+
+
+_days_left_date = None
+
+
+def refresh_days_left_daily() -> None:
+    """Keep "days left" correct for a server that stays up for weeks."""
+    global _days_left_date
+    today = dt.date.today()
+    if _days_left_date == today:
+        return
+    conn = connect()
+    try:
+        recompute_days_left(conn)
+        _days_left_date = today
+    finally:
+        conn.close()
 
 
 def log_refresh(conn, started, finished, found, added, updated, log_text, ok=True) -> None:

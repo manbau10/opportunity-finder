@@ -116,14 +116,39 @@ def contract_modifier(title: str, body: str = "") -> Tuple[float, List[str], Lis
     return factor, warnings, positives
 
 
+_US_STATE_CODES = (
+    "AL AK AZ AR CA CO CT DE FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ "
+    "NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY DC").split()
+_CA_PROVINCES = "AB BC MB NB NL NS ON PE QC SK YT NT NU".split()
+_US_STATE_RE = re.compile(r"(?:,|\()\s*(?:%s)(?![A-Za-z.])" % "|".join(_US_STATE_CODES))
+_CA_PROV_RE = re.compile(r"(?:,|\()\s*(?:%s)(?![A-Za-z])" % "|".join(_CA_PROVINCES))
+_COUNTRY_PATTERNS: Dict[str, re.Pattern] = {}
+
+
+def _country_pattern(country: str, cues) -> re.Pattern:
+    """One whole-word pattern per country, so 'reading' no longer means the UK."""
+    if country not in _COUNTRY_PATTERNS:
+        parts = sorted({c.strip() for c in cues if c.strip()}, key=len, reverse=True)
+        _COUNTRY_PATTERNS[country] = re.compile(
+            r"(?<![a-z0-9])(?:" + "|".join(re.escape(c) for c in parts) + r")(?![a-z0-9])")
+    return _COUNTRY_PATTERNS[country]
+
+
 def locate(*fields: str) -> Tuple[str, str]:
     """Return (country, tier) where tier is target / secondary / unknown."""
-    blob = " ".join(f or "" for f in fields).lower()
+    original = " ".join(f or "" for f in fields)
+    blob = original.lower()
+    place = " ".join(f or "" for f in fields[:1])
+    # "Austin, TX" and "Calgary, AB" are unambiguous even when the city name is not.
+    if _US_STATE_RE.search(place):
+        return "United States", "target"
+    if _CA_PROV_RE.search(place):
+        return "Canada", "target"
     for country, cues in P.TARGET_COUNTRIES.items():
-        if any(cue in blob for cue in cues):
+        if _country_pattern(country, cues).search(blob):
             return country, "target"
     for country, cues in P.SECONDARY_COUNTRIES.items():
-        if any(cue in blob for cue in cues):
+        if _country_pattern(country, cues).search(blob):
             return country, "secondary"
     return "", "unknown"
 
@@ -263,11 +288,9 @@ def score_opportunity(item: Dict) -> Dict:
         flags.append("weak subject overlap")
 
     if role_key == "phd":
-        flags.append("PhD-level post - below your stage")
+        flags.append("PhD studentship")
     if role_key == "chair":
-        flags.append("senior chair - likely above your current stage")
-    if country_tier == "secondary":
-        flags.append("outside your target regions (%s)" % country)
+        flags.append("senior chair-level post")
     if days_left is not None and days_left < 0:
         flags.append("deadline passed")
     elif days_left is not None and days_left <= 5:

@@ -109,7 +109,8 @@ function applyHeadlineFilter(action) {
 
 /* ------------------------------------------------------------------ facets */
 function renderFacets(f) {
-  $('#roleFacets').innerHTML = f.roles.map(r =>
+  const roleBox = $('#roleFacets');
+  if (roleBox) roleBox.innerHTML = f.roles.map(r =>
     `<button class="chip ${state.roles.includes(r.key) ? 'on' : ''}" data-role="${esc(r.key)}">
        ${esc(r.name)}<span class="n">${r.n}</span></button>`).join('');
 
@@ -398,7 +399,8 @@ async function pollRefresh() {
 
 $('#refreshBtn').addEventListener('click', async () => {
   $('#refreshBtn').disabled = true;
-  await fetch('/api/refresh?track=' + encodeURIComponent(appConfig.track), { method: 'POST' });
+  await fetch('/api/refresh?track=' + encodeURIComponent(appConfig.track),
+    { method: 'POST', headers: { 'X-CSRF-Token': appConfig.csrf } });
   toast('Searching the job boards… this takes a few minutes.');
   pollRefresh();
 });
@@ -406,7 +408,12 @@ $('#refreshBtn').addEventListener('click', async () => {
 /* --------------------------------------------------- filters on a phone */
 // The panel is open in the markup so desktop needs no JS; a narrow screen
 // collapses it so the results, not the controls, are what you land on.
+function syncFilters() {
+  const panel = $('#filters');
+  if (window.innerWidth > 940) panel.setAttribute('open', '');
+}
 if (window.innerWidth <= 940) $('#filters').removeAttribute('open');
+window.addEventListener('resize', syncFilters);
 
 function updateFilterHint() {
   const active = [];

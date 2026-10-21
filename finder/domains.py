@@ -8,6 +8,7 @@ unrelated role look suitable.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 
 DOMAIN_LABELS = {
@@ -104,15 +105,46 @@ TARGET_TITLES = {
 }
 
 
+_COMPILED = {
+    domain: [re.compile(pattern, re.I) for pattern in patterns]
+    for domain, patterns in DOMAIN_PATTERNS.items()
+}
+# One cheap alternation per domain: most adverts match few domains, so the
+# per-pattern counting below only runs where there is something to count.
+_ANY = {
+    domain: re.compile("|".join(f"(?:{p})" for p in patterns), re.I)
+    for domain, patterns in DOMAIN_PATTERNS.items()
+}
+# The evidence in an advert's first few thousand characters decides its occupation;
+# scanning a 12,000-character advert with ~100 patterns made re-scoring slow.
+EVIDENCE_CHARS = 4000
+
+
+# "ML infrastructure", "cloud infrastructure", "cybersecurity infrastructure" are IT
+# roles, not civil infrastructure, whatever the job board.
+_TECH_INFRA = re.compile(
+    r"\b(?:it|cloud|ml|ai|data|cyber(?:security)?|network|platform|security|devops|software|"
+    r"server|gpu|aws|azure|gcp|kubernetes|hybrid|compute|forward deployed|site reliability)"
+    r"[\s-]+infrastructure\b")
+
+
+@lru_cache(maxsize=30000)
+def _classify_cached(value: str, weight: int) -> tuple:
+    value = _TECH_INFRA.sub("software platform", value)
+    scores = []
+    for domain, patterns in _COMPILED.items():
+        if not _ANY[domain].search(value):
+            continue
+        hits = sum(len(pattern.findall(value)) for pattern in patterns)
+        if hits:
+            scores.append((domain, hits * weight))
+    return tuple(scores)
+
+
 def classify(text: str, *, title: bool = False) -> dict[str, int]:
     """Return evidence counts by occupational domain."""
-    value = (text or "").lower()
-    scores: dict[str, int] = {}
-    for domain, patterns in DOMAIN_PATTERNS.items():
-        hits = sum(len(re.findall(pattern, value, flags=re.I)) for pattern in patterns)
-        if hits:
-            scores[domain] = hits * (4 if title else 1)
-    return scores
+    value = (text or "")[:EVIDENCE_CHARS].lower()
+    return dict(_classify_cached(value, 4 if title else 1))
 
 
 def ranked_domains(text: str) -> list[dict]:

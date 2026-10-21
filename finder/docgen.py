@@ -16,15 +16,19 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Mm, Pt, RGBColor
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib.pagesizes import A4, LETTER
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Paragraph, SimpleDocTemplate
-import reportlab
+try:
+    import reportlab
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import A4, LETTER
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import Paragraph, SimpleDocTemplate
+    PDF_AVAILABLE = True
+except ImportError:                    # the app must still start; PDF snapshots are skipped
+    PDF_AVAILABLE = False
 
 
 BLACK = RGBColor(0, 0, 0)
@@ -443,6 +447,8 @@ def tailor_cv_docx(original: bytes, edits: dict) -> tuple[bytes, dict]:
 
 def webpage_pdf(title: str, url: str, text: str, retrieved_at: str,
                 *, page_system: str = "letter") -> bytes:
+    if not PDF_AVAILABLE:
+        raise RuntimeError("PDF support is not installed (pip install reportlab).")
     output = io.BytesIO()
     pagesize = A4 if page_system == "a4" else LETTER
     doc = SimpleDocTemplate(
