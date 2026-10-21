@@ -662,6 +662,28 @@ def api_save_provider():
         return jsonify({"error": str(exc)}), 400
 
 
+@app.route("/api/providers/models", methods=["POST"])
+@auth.login_required
+def api_provider_models():
+    """List the models the entered (or saved) key can use, for the model dropdown."""
+    auth.verify_csrf()
+    data = request.get_json(silent=True) or {}
+    provider = (data.get("ai_provider") or "").lower()
+    if provider not in providers.AI_PRESETS:
+        return jsonify({"error": "Choose an AI provider first."}), 400
+    saved = providers.get_config(g.user["id"], include_keys=True) or {}
+    key = data.get("ai_key") or (saved.get("ai_key", "") if saved.get("ai_provider") == provider else "")
+    if not key and provider not in {"ollama", "lmstudio"}:
+        return jsonify({"error": "Paste your API key first, then load the models."}), 400
+    try:
+        models = providers.list_models(provider, data.get("ai_base_url") or "", key)
+    except Exception as exc:
+        message = providers.scrub(f"{type(exc).__name__}: {exc}", key)
+        hint = providers.key_hint(provider, key)
+        return jsonify({"error": (hint + " " if hint else "") + message}), 400
+    return jsonify({"models": models})
+
+
 @app.route("/api/providers/test", methods=["POST"])
 @auth.login_required
 def api_test_provider():
@@ -682,7 +704,11 @@ def api_test_provider():
                         "search_provider": search_provider,
                         "search_results": search_results, "search_error": search_error})
     except Exception as exc:
-        return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 400
+        cfg = providers.get_config(g.user["id"], include_keys=True) or {}
+        key = cfg.get("ai_key", "")
+        hint = providers.key_hint(cfg.get("ai_provider", ""), key)
+        return jsonify({"error": (hint + " " if hint else "") +
+                        providers.scrub(f"{type(exc).__name__}: {exc}", key, cfg.get("search_key", ""))}), 400
 
 
 @app.route("/api/packs", methods=["POST"])

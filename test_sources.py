@@ -427,3 +427,40 @@ class InviteTest(unittest.TestCase):
             self.assertIn(b"Invite code", c.get("/register").data)
             self.assertEqual(c.post("/register", data={**form, "invite_code": "nope"}).status_code, 200)
             self.assertEqual(c.post("/register", data={**form, "invite_code": "friends-2026"}).status_code, 302)
+
+
+class ProviderModelsTest(unittest.TestCase):
+    def test_keys_never_appear_in_messages(self):
+        from finder import providers
+        msg = "404 for url: https://x/v1beta/models/m:generateContent?key=AQ.secretvalue123&alt=1"
+        self.assertNotIn("secretvalue", providers.scrub(msg, "AQ.secretvalue123"))
+        self.assertIn("aistudio.google.com", providers.key_hint("gemini", "AQ.abc"))
+        self.assertEqual(providers.key_hint("gemini", "AIzaabc"), "")
+
+    def test_gemini_models_are_listed_for_the_dropdown(self):
+        from finder import providers
+
+        class Reply:
+            def raise_for_status(self): pass
+            def json(self):
+                return {"models": [
+                    {"name": "models/gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]},
+                    {"name": "models/gemini-2.5-pro", "supportedGenerationMethods": ["generateContent"]},
+                    {"name": "models/text-embedding-004", "supportedGenerationMethods": ["embedContent"]},
+                    {"name": "models/imagen-4", "supportedGenerationMethods": ["generateContent"]}]}
+        with patch.object(providers.requests, "get", return_value=Reply()) as get:
+            names = providers.list_models("gemini", "", "AIzaFakeKey1234")
+        self.assertEqual(names, ["gemini-2.5-flash", "gemini-2.5-pro"])
+        self.assertNotIn("AIzaFakeKey1234", str(get.call_args.args))       # key is in a header only
+        self.assertEqual(get.call_args.kwargs["headers"]["x-goog-api-key"], "AIzaFakeKey1234")
+
+    def test_openai_style_models(self):
+        from finder import providers
+
+        class Reply:
+            def raise_for_status(self): pass
+            def json(self): return {"data": [{"id": "gpt-4.1-mini"}, {"id": "gpt-4.1"}]}
+        with patch.object(providers.requests, "get", return_value=Reply()) as get:
+            names = providers.list_models("openai", "", "sk-test-key-123")
+        self.assertEqual(names, ["gpt-4.1", "gpt-4.1-mini"])
+        self.assertEqual(get.call_args.args[0], "https://api.openai.com/v1/models")

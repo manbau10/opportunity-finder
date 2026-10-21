@@ -16,9 +16,10 @@
   <label>AI provider<select name="ai_provider" id="aiProvider">
     {% for item in catalog.ai %}<option value="{{ item.key }}" {{ 'selected' if config and config.ai_provider == item.key else '' }}>{{ item.label }}</option>{% endfor %}
   </select></label>
-  <label>AI model<input name="ai_model" list="poeModels" value="{{ config.ai_model if config else catalog.ai[0].default_model }}" placeholder="Provider model name" required>
-    <span class="field-help" id="modelHelp">For Poe, the recommended model is already selected.</span></label>
-  <datalist id="poeModels"><option value="Claude-Sonnet-4.6"><option value="Claude-Opus-4.7"><option value="Gemini-3.1-Pro"><option value="GPT-5.4"></datalist>
+  <label>AI model<input name="ai_model" list="modelList" id="aiModel" value="{{ config.ai_model if config else catalog.ai[0].default_model }}" placeholder="Pick from the list or type a model name" required autocomplete="off">
+    <span class="field-help" id="modelHelp">Paste your key, then press <b>Load available models</b> to choose from the list.</span>
+    <button class="btn tiny" type="button" id="loadModels" style="margin-top:6px">Load available models</button></label>
+  <datalist id="modelList"></datalist>
   <label class="span-2">AI API key<input type="password" name="ai_key" autocomplete="new-password" spellcheck="false" placeholder="{{ 'A key is saved — leave blank to keep it' if config and config.has_ai_key else 'Paste the API key here' }}">
     <span class="field-help">Your key is encrypted. It is never displayed again and is not included in downloaded files.</span></label>
   <details class="span-2 advanced"><summary>Advanced connection details</summary>
@@ -51,7 +52,7 @@ const presets=Object.fromEntries(APP.catalog.ai.map(x=>[x.key,x]));
 const provider=document.querySelector('#aiProvider'),guide=document.querySelector('#poeGuide'),searchProvider=document.querySelector('#searchProvider'),searchKeyField=document.querySelector('#searchKeyField');
 function showGuide(){guide.hidden=provider.value!=='poe';}
 function showSearchKey(){const free=searchProvider.value==='duckduckgo';searchKeyField.hidden=free;searchKeyField.querySelector('input').disabled=free;}
-provider.addEventListener('change',e=>{const p=presets[e.target.value];form.ai_model.value=p.default_model;form.ai_base_url.value=p.default_url;showGuide();});showGuide();
+provider.addEventListener('change',e=>{const p=presets[e.target.value];form.ai_model.value=p.default_model;form.ai_base_url.value=p.default_url;modelList.innerHTML='';showGuide();});showGuide();
 searchProvider.addEventListener('change',showSearchKey);showSearchKey();
 async function save(testAfter=false){status.textContent=testAfter?'Saving securely…':'Saving…';status.className='form-status';const body=Object.fromEntries(new FormData(form));
 const r=await fetch('/api/providers',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':APP.csrf},body:JSON.stringify(body)});const d=await r.json();if(!r.ok){status.textContent=d.error||'Save failed';status.className='form-status error';return false;}
@@ -61,4 +62,15 @@ if(td.search_results>0){status.textContent='AI and web search both work. Researc
 status.textContent='AI works. Web search returned nothing'+(td.search_provider==='duckduckgo'?' (DuckDuckGo often blocks automated requests)':'')+'. Research will use the advert, the organisation\u2019s official website and Wikipedia; add a Tavily, Brave or Serper key for full web research.';status.className='form-status success';return true;}
 form.addEventListener('submit',e=>{e.preventDefault();save(false);});
 document.querySelector('#saveTestProvider').onclick=()=>save(true);
+const modelList=document.querySelector('#modelList'),modelHelp=document.querySelector('#modelHelp');
+document.querySelector('#loadModels').onclick=async()=>{
+  modelHelp.textContent='Asking the provider which models your key can use…';
+  const body={ai_provider:form.ai_provider.value,ai_base_url:form.ai_base_url.value,ai_key:form.ai_key.value};
+  const r=await fetch('/api/providers/models',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':APP.csrf},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(!r.ok){modelHelp.textContent=d.error||'Could not load models.';modelHelp.style.color='#a33';return;}
+  modelHelp.style.color='';modelList.innerHTML=d.models.map(m=>'<option value="'+m.replace(/"/g,'')+'">').join('');
+  modelHelp.textContent=d.models.length+' models available. Click the model box and choose one.';
+  if(d.models.length&&!d.models.includes(form.ai_model.value)){form.ai_model.value='';form.ai_model.focus();}
+};
 </script></body></html>

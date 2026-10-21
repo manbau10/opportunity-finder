@@ -19,7 +19,7 @@ AI_PRESETS = {
     "poe": ("https://api.poe.com/v1/chat/completions", "Claude-Sonnet-4.6"),
     "openai": ("https://api.openai.com/v1/chat/completions", "gpt-4.1-mini"),
     "anthropic": ("https://api.anthropic.com/v1/messages", "claude-3-5-haiku-latest"),
-    "gemini": ("https://generativelanguage.googleapis.com/v1beta", "gemini-2.0-flash"),
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
     "openrouter": ("https://openrouter.ai/api/v1/chat/completions", "openai/gpt-4.1-mini"),
     "groq": ("https://api.groq.com/openai/v1/chat/completions", "llama-3.3-70b-versatile"),
     "mistral": ("https://api.mistral.ai/v1/chat/completions", "mistral-small-latest"),
@@ -173,8 +173,10 @@ def chat(user_id: str, system: str, prompt: str, max_tokens: int = 5000) -> str:
         response.raise_for_status()
         return "\n".join(block.get("text", "") for block in response.json().get("content", []))
     if provider == "gemini":
-        endpoint = f"{url}/models/{model}:generateContent?key={key}"
-        response = requests.post(endpoint, timeout=timeout, json={
+        # The key travels in a header, never in the URL, so it cannot leak through
+        # an error message, a log line or a browser history.
+        endpoint = f"{url}/models/{model}:generateContent"
+        response = requests.post(endpoint, timeout=timeout, headers={"x-goog-api-key": key}, json={
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.25},
@@ -202,3 +204,62 @@ def public_catalog() -> dict:
                 "default_model": v[1]} for k, v in AI_PRESETS.items()],
         "search": SEARCH_PROVIDER_ORDER,
     }
+
+
+def scrub(message: str, *secrets_: str) -> str:
+    """Remove any API key from text before it is shown or logged."""
+    import re
+    for secret in secrets_:
+        if secret and len(secret) > 6:
+            message = message.replace(secret, "***")
+    return re.sub(r"([?&]key=)[^&\s]+", r"\1***", message)
+
+
+def key_hint(provider: str, key: str) -> str:
+    """A plain-language hint when a key looks like it belongs to a different service."""
+    if provider == "gemini" and key.startswith("AQ."):
+        return ("This key looks like a Google Cloud (Vertex AI) key. Free Gemini keys come from "
+                "https://aistudio.google.com/apikey and start with AIza.")
+    if provider == "openai" and key.startswith("AIza"):
+        return "This is a Google key. Choose Google Gemini as the provider."
+    if provider == "gemini" and key.startswith("sk-"):
+        return "This looks like an OpenAI key. Choose OpenAI as the provider."
+    return ""
+
+
+def list_models(provider: str, base_url: str, key: str) -> list[str]:
+    """Ask the provider which models this key can use, so people pick instead of typing."""
+    base = _validate_base_url(provider, base_url)
+    timeout = 20
+    if provider == "gemini":
+        rows, token = [], ""
+        for _ in range(5):
+            response = requests.get(f"{base}/models", timeout=timeout,
+                                    params={"pageSize": 200, **({"pageToken": token} if token else {})},
+                                    headers={"x-goog-api-key": key})
+            response.raise_for_status()
+            data = response.json()
+            rows += data.get("models", [])
+            token = data.get("nextPageToken", "")
+            if not token:
+                break
+        names = [m["name"].split("/", 1)[-1] for m in rows
+                 if "generateContent" in m.get("supportedGenerationMethods", [])]
+        # Text models first; skip image/audio/embedding/tuned variants.
+        skip = ("embedding", "imagen", "veo", "tts", "image", "live", "audio", "aqa", "robotics")
+        names = [n for n in names if not any(word in n for word in skip)]
+        return sorted(set(names), key=lambda n: (not n.startswith("gemini"), n), reverse=False)
+    if provider == "anthropic":
+        response = requests.get("https://api.anthropic.com/v1/models", timeout=timeout, params={"limit": 100},
+                                headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
+        response.raise_for_status()
+        return [m["id"] for m in response.json().get("data", [])]
+    # OpenAI-compatible services (OpenAI, Groq, Mistral, OpenRouter, Poe, Ollama, LM Studio, custom)
+    root = base.rsplit("/chat/completions", 1)[0]
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    response = requests.get(f"{root}/models", timeout=timeout, headers=headers)
+    response.raise_for_status()
+    data = response.json()
+    rows = data.get("data", data if isinstance(data, list) else [])
+    ids = sorted({m.get("id") or m.get("name") for m in rows if isinstance(m, dict)} - {None})
+    return ids
