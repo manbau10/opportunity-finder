@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import re
+import time
 import hashlib
 import json
 import os
@@ -19,7 +21,7 @@ AI_PRESETS = {
     "poe": ("https://api.poe.com/v1/chat/completions", "Claude-Sonnet-4.6"),
     "openai": ("https://api.openai.com/v1/chat/completions", "gpt-4.1-mini"),
     "anthropic": ("https://api.anthropic.com/v1/messages", "claude-3-5-haiku-latest"),
-    "gemini": ("https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
+    "gemini": ("https://generativelanguage.googleapis.com/v1beta", "gemini-3.5-flash"),
     "openrouter": ("https://openrouter.ai/api/v1/chat/completions", "openai/gpt-4.1-mini"),
     "groq": ("https://api.groq.com/openai/v1/chat/completions", "llama-3.3-70b-versatile"),
     "mistral": ("https://api.mistral.ai/v1/chat/completions", "mistral-small-latest"),
@@ -176,13 +178,26 @@ def chat(user_id: str, system: str, prompt: str, max_tokens: int = 5000) -> str:
         # The key travels in a header, never in the URL, so it cannot leak through
         # an error message, a log line or a browser history.
         endpoint = f"{url}/models/{model}:generateContent"
-        response = requests.post(endpoint, timeout=timeout, headers={"x-goog-api-key": key}, json={
+        body = {
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.25},
-        })
-        response.raise_for_status()
-        return response.json()["candidates"][0]["content"]["parts"][0]["text"]
+        }
+        last_error: Exception | None = None
+        for attempt in range(3):      # new models are often briefly overloaded (503/429)
+            try:
+                response = requests.post(endpoint, timeout=timeout,
+                                         headers={"x-goog-api-key": key}, json=body)
+                if response.status_code in (429, 500, 503) and attempt < 2:
+                    time.sleep(4 * (attempt + 1))
+                    continue
+                response.raise_for_status()
+                parts = response.json()["candidates"][0]["content"]["parts"]
+                return "".join(part.get("text", "") for part in parts)
+            except requests.ConnectionError as exc:
+                last_error = exc
+                time.sleep(3)
+        raise last_error  # type: ignore[misc]
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = f"Bearer {key}"
@@ -242,10 +257,13 @@ def list_models(provider: str, base_url: str, key: str) -> list[str]:
                 break
         names = [m["name"].split("/", 1)[-1] for m in rows
                  if "generateContent" in m.get("supportedGenerationMethods", [])]
-        # Text models first; skip image/audio/embedding/tuned variants.
-        skip = ("embedding", "imagen", "veo", "tts", "image", "live", "audio", "aqa", "robotics")
+        # Text models for writing documents. Image, audio, speech, agent and robotics
+        # variants cannot write an application.
+        skip = ("embedding", "imagen", "veo", "tts", "image", "live", "audio", "aqa", "robotics",
+                "customtools", "antigravity", "deep-research", "nano-banana", "omni", "transcribe",
+                "lyria", "computer-use", "argon")
         names = [n for n in names if not any(word in n for word in skip)]
-        return sorted(set(names), key=lambda n: (not n.startswith("gemini"), n), reverse=False)
+        return sorted(set(names), key=_gemini_rank)
     if provider == "anthropic":
         response = requests.get("https://api.anthropic.com/v1/models", timeout=timeout, params={"limit": 100},
                                 headers={"x-api-key": key, "anthropic-version": "2023-06-01"})
@@ -260,3 +278,15 @@ def list_models(provider: str, base_url: str, key: str) -> list[str]:
     rows = data.get("data", data if isinstance(data, list) else [])
     ids = sorted({m.get("id") or m.get("name") for m in rows if isinstance(m, dict)} - {None})
     return ids
+
+
+def _gemini_rank(name: str):
+    """Newest, fastest-to-answer models first. The API still lists retired 2.0/2.5 models
+    that answer 404 to new users, so those go last."""
+    version = re.search(r"gemini-(\d+(?:\.\d+)?)", name)
+    number = float(version.group(1)) if version else 0.0
+    retired = number and number < 3
+    flash = 0 if "flash" in name and "lite" not in name else (1 if "lite" in name else 2)
+    stable = ("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-3-flash-preview")
+    return (0 if name in stable else 1, stable.index(name) if name in stable else 0,
+            1 if retired else 0, flash, -number, name)

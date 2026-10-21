@@ -708,9 +708,9 @@ def api_test_provider():
         key = cfg.get("ai_key", "")
         hint = providers.key_hint(cfg.get("ai_provider", ""), key)
         text = providers.scrub(f"{type(exc).__name__}: {exc}", key, cfg.get("search_key", ""))
-        if "404" in text and not hint:
-            hint = ("The provider does not know that model name for your key. Press "
-                    "'Load available models' and choose one from the list.")
+        if ("no longer available" in text or "404" in text) and not hint:
+            hint = ("That model is not available to your key (providers retire older models, "
+                    "and some still list them). Press 'Load available models' and choose a newer one.")
         return jsonify({"error": (hint + " " if hint else "") + text}), 400
 
 
