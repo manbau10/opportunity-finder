@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS opportunities (
     last_seen     TEXT,
     status        TEXT DEFAULT 'new'
     ,career_track TEXT DEFAULT 'academic'
+    ,owner_user_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_score  ON opportunities(score DESC);
 CREATE INDEX IF NOT EXISTS idx_seen   ON opportunities(first_seen DESC);

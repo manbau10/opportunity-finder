@@ -26,6 +26,7 @@
       <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M12 4V1L8 5l4 4V6a6 6 0 1 1-6 6H4a8 8 0 1 0 8-8z"/></svg>
       <span>Refresh now</span>
     </button>
+    <button id="addJobBtn" class="btn" type="button">Add a job</button>
     <button id="themeBtn" class="btn icon" title="Toggle theme" aria-label="Toggle theme">◐</button>
     <a class="btn" href="{{ url_for('applications_page') }}">My applications</a>
     <a class="btn" href="{{ url_for('sources_page') }}">Job sources</a>
@@ -151,6 +152,27 @@
   <div class="drawer-inner">
     <button class="drawer-close" id="drawerClose" aria-label="Close">&times;</button>
     <div id="drawerBody"></div>
+  </div>
+</div>
+
+<div id="addJob" class="drawer" hidden>
+  <div class="drawer-inner">
+    <button class="drawer-close" id="addJobClose" aria-label="Close">&times;</button>
+    <h2>Add a job from any website</h2>
+    <p class="tiny muted">Found a post on HigherEdJobs, LinkedIn, a university page or anywhere else? Paste its link.
+      We read the page if the site allows it. If not, paste the advert text. The job is private to you,
+      is matched to your CV, and can have an application workspace like any other.</p>
+    <form id="addJobForm" class="stack-form">
+      <label>Web address of the advert<input name="url" type="url" required placeholder="https://"></label>
+      <label>Job title <span class="tiny muted">(if we cannot read it)</span><input name="title"></label>
+      <label>Employer<input name="org"></label>
+      <label>Location<input name="location"></label>
+      <label>Closing date <span class="tiny muted">(optional, YYYY-MM-DD)</span><input name="deadline"></label>
+      <label>Advert text <span class="tiny muted">(paste it if the site blocked us)</span>
+        <textarea name="description" rows="8"></textarea></label>
+      <div class="form-actions"><button class="btn primary" type="submit">Add and match</button>
+        <span id="addJobStatus" class="form-status" aria-live="polite"></span></div>
+    </form>
   </div>
 </div>
 

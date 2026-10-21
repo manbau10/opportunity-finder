@@ -335,3 +335,81 @@ class StorageTest(unittest.TestCase):
                            (item["id"],)).fetchone()
         conn.close()
         self.assertEqual(row["n"], 5000)
+
+
+class KeyedSourceTest(unittest.TestCase):
+    def test_sources_switch_on_only_with_keys(self):
+        with patch.dict(os.environ, {}, clear=False):
+            for name in ("ADZUNA_APP_ID", "JOOBLE_API_KEY", "USAJOBS_API_KEY", "REED_API_KEY"):
+                os.environ.pop(name, None)
+            self.assertEqual(ind.keyed_sources(), [])
+        with patch.dict(os.environ, {"JOOBLE_API_KEY": "k", "REED_API_KEY": "r"}):
+            self.assertEqual([k for k, _ in ind.keyed_sources()], ["jooble", "uk_reed_api"])
+
+    def test_usajobs_row(self):
+        payload = {"SearchResult": {"SearchResultItems": [{"MatchedObjectDescriptor": {
+            "PositionTitle": "Civil Engineer", "OrganizationName": "US Army Corps",
+            "PositionLocationDisplay": "Seattle, Washington", "PositionURI": "https://www.usajobs.gov/job/1",
+            "PublicationStartDate": "2026-10-01", "ApplicationCloseDate": "2026-11-01",
+            "UserArea": {"Details": {"JobSummary": "Design flood works."}}}}]}}
+        with patch.dict(os.environ, {"USAJOBS_API_KEY": "k", "USAJOBS_EMAIL": "a@b.c"}), \
+             patch.object(ind, "get_json", return_value=payload):
+            items = ind.fetch_usajobs(["civil engineer"], lambda *_: None)
+        self.assertEqual(items[0]["deadline"], "2026-11-01")
+        self.assertEqual(items[0]["country"], "United States")
+
+
+class ManualJobTest(unittest.TestCase):
+    def test_private_job_is_visible_only_to_its_owner(self):
+        from finder import auth, manual_jobs, store
+        a, _ = auth.register_user("Owner One", "owner1@example.invalid", "a-long-test-password-1")
+        b, _ = auth.register_user("Owner Two", "owner2@example.invalid", "a-long-test-password-1")
+        cv = ("Civil engineer and construction management researcher. Water infrastructure, BIM. " * 12).encode()
+        for u in (a, b):
+            profiles.save_profile(u["id"], "industry", "cv.txt", cv)
+        text = "We seek a civil engineer for water infrastructure and construction management projects. " * 5
+        with patch.object(manual_jobs, "prefill", return_value={}):
+            job = manual_jobs.add_job(a["id"], "industry", {
+                "url": "https://www.higheredjobs.com/details.cfm?JobCode=1", "title": "Civil Engineer",
+                "org": "Some University", "description": text})
+        matching.rebuild_matches(a["id"], "industry")
+        matching.rebuild_matches(b["id"], "industry")
+        conn = store.connect()
+        mine = conn.execute("SELECT 1 FROM user_matches WHERE user_id=? AND opportunity_id=?", (a["id"], job["id"])).fetchone()
+        theirs = conn.execute("SELECT 1 FROM user_matches WHERE user_id=? AND opportunity_id=?", (b["id"], job["id"])).fetchone()
+        conn.close()
+        self.assertIsNotNone(mine)
+        self.assertIsNone(theirs)
+
+    def test_blocked_site_without_text_asks_for_the_text(self):
+        from finder import manual_jobs
+        with patch.object(manual_jobs, "prefill", return_value={}):
+            with self.assertRaises(ValueError) as ctx:
+                manual_jobs.add_job("u", "industry", {"url": "https://x.example/job/1", "title": "T"})
+        self.assertIn("Paste the advert text", str(ctx.exception))
+        with self.assertRaises(ValueError):
+            manual_jobs.add_job("u", "industry", {"url": "javascript:alert(1)"})
+
+
+class AccountTest(unittest.TestCase):
+    def test_export_delete_and_limits(self):
+        from finder import account, auth, store
+        u, _ = auth.register_user("Gone Soon", "gone@example.invalid", "a-long-test-password-1")
+        profiles.save_profile(u["id"], "industry", "cv.txt", ("Civil engineer water infrastructure. " * 20).encode())
+        data = account.export_data(u["id"])
+        self.assertEqual(data["account"]["email"], "gone@example.invalid")
+        self.assertEqual(len(data["cv_profiles"]), 1)
+        self.assertFalse(account.delete_account(u["id"], "wrong password"))
+        self.assertTrue(account.delete_account(u["id"], "a-long-test-password-1"))
+        conn = store.connect()
+        left = conn.execute("SELECT (SELECT COUNT(*) FROM users WHERE id=?) + "
+                            "(SELECT COUNT(*) FROM user_profiles WHERE user_id=?) AS n",
+                            (u["id"], u["id"])).fetchone()["n"]
+        conn.close()
+        self.assertEqual(left, 0)
+
+    def test_rate_limiter(self):
+        from finder.account import RateLimiter
+        limiter = RateLimiter(limit=3, window=60)
+        self.assertEqual([limiter.allow("a") for _ in range(4)], [True, True, True, False])
+        self.assertTrue(limiter.allow("b"))

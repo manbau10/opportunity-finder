@@ -37,7 +37,10 @@ INDUSTRY = [
 ]
 
 OPTIONAL = [
-    ("adzuna", "Adzuna", "19 countries (set ADZUNA_APP_ID and ADZUNA_APP_KEY to switch on)", "https://developer.adzuna.com"),
+    ("adzuna", "Adzuna", "19 countries. Needs ADZUNA_APP_ID and ADZUNA_APP_KEY.", "https://developer.adzuna.com"),
+    ("jooble", "Jooble", "About 70 countries. Needs JOOBLE_API_KEY.", "https://jooble.org/api/about"),
+    ("us_usajobs", "USAJOBS", "US federal jobs. Needs USAJOBS_API_KEY and USAJOBS_EMAIL.", "https://developer.usajobs.gov"),
+    ("uk_reed_api", "Reed API", "United Kingdom. Needs REED_API_KEY.", "https://www.reed.co.uk/developers"),
 ]
 
 

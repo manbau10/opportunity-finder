@@ -21,12 +21,18 @@
     <label>Email address<input type="email" name="email" required autocomplete="email"></label>
     <label>Password<input type="password" name="password" required minlength="10"
       autocomplete="{{ 'new-password' if mode == 'register' else 'current-password' }}"></label>
+    {% if mode == 'register' %}
+    <label class="check"><input type="checkbox" name="accept_terms" value="1" required>
+      I agree to the <a href="{{ url_for('terms_page') }}" target="_blank">Terms of Use</a> and
+      <a href="{{ url_for('privacy_page') }}" target="_blank">Privacy Policy</a></label>
+    {% endif %}
     <button class="btn primary wide" type="submit">{{ 'Create account' if mode == 'register' else 'Sign in' }}</button>
   </form>
   <p class="auth-switch">
     {% if mode == 'register' %}Already registered? <a href="{{ url_for('login') }}">Sign in</a>
     {% else %}New here? <a href="{{ url_for('register') }}">Create an account</a>{% endif %}
   </p>
+  <p class="auth-switch tiny"><a href="{{ url_for('terms_page') }}">Terms</a> &middot; <a href="{{ url_for('privacy_page') }}">Privacy</a></p>
 </main>
 </body>
 </html>

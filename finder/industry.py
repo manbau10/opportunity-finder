@@ -281,8 +281,7 @@ def fetch(log=print) -> list[dict]:
     titles = queries.industry_titles() or DEFAULT_TITLES
     log("  industry searches: %d job titles from the uploaded CVs" % len(titles))
     jobs = [(key, fn) for key, _label, _country, fn in industry_sources.SOURCES]
-    if industry_sources.adzuna_enabled():
-        jobs.append(("adzuna", industry_sources.fetch_adzuna))
+    jobs.extend(industry_sources.keyed_sources())
     if _wants_nhs():
         jobs.append(("nhs", lambda _titles, lg: _fetch_nhs(lg)))
     jobs.append(("web", lambda _titles, lg: _fetch_profile_web_jobs(lg)))

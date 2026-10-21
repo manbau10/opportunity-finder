@@ -25,7 +25,7 @@ from flask import (Flask, flash, g, jsonify, redirect, render_template, request,
                    send_file, session, url_for)
 
 from finder import db, pipeline, store
-from finder import appkey, auth, catalog, matching, profiles, providers
+from finder import account, appkey, auth, catalog, manual_jobs, matching, profiles, providers
 from finder.application_pack import (
     WORKSPACE_STEPS, get_pack, get_pack_file, get_pack_opportunity, list_pack_files,
     list_packs, pack_filename, request_cancel, start_pack,
@@ -186,12 +186,80 @@ def index():
                            csrf=auth.csrf_token())
 
 
+AUTH_LIMIT = account.RateLimiter(limit=12, window=600)
+
+
+def _client_ip() -> str:
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    return (forwarded.split(",")[0].strip() if forwarded else request.remote_addr) or "unknown"
+
+
+def _too_many_attempts():
+    flash("Too many attempts. Please wait ten minutes and try again.", "error")
+    return render_template("auth.html", mode=request.endpoint, csrf=auth.csrf_token()), 429
+
+
+@app.route("/terms")
+def terms_page():
+    return render_template("legal.html", page="terms", operator=_operator(), user=g.user)
+
+
+@app.route("/privacy")
+def privacy_page():
+    return render_template("legal.html", page="privacy", operator=_operator(), user=g.user)
+
+
+@app.route("/robots.txt")
+def robots():
+    return ("User-agent: *\nDisallow: /api/\nDisallow: /applications\nDisallow: /profile\n"
+            "Disallow: /settings\n", 200, {"Content-Type": "text/plain"})
+
+
+def _operator() -> dict:
+    return {"name": os.environ.get("OPERATOR_NAME", "the operator of this service"),
+            "email": os.environ.get("CONTACT_EMAIL", "the contact address shown where you signed up")}
+
+
+@app.after_request
+def _security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if request.path.startswith(("/api/", "/applications", "/profile", "/settings")):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
+
+@app.route("/api/account/export")
+@auth.login_required
+def api_account_export():
+    payload = json.dumps(account.export_data(g.user["id"]), indent=2, default=str)
+    return send_file(io.BytesIO(payload.encode("utf-8")), mimetype="application/json",
+                     as_attachment=True, download_name="my-opportunity-finder-data.json")
+
+
+@app.route("/api/account/delete", methods=["POST"])
+@auth.login_required
+def api_account_delete():
+    auth.verify_csrf()
+    password = (request.get_json(silent=True) or {}).get("password", "")
+    if not account.delete_account(g.user["id"], password):
+        return jsonify({"error": "That password is not correct."}), 400
+    session.clear()
+    return jsonify({"ok": True})
+
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if g.user:
         return redirect(url_for("index"))
     if request.method == "POST":
         auth.verify_csrf()
+        if not AUTH_LIMIT.allow("register:" + _client_ip()):
+            return _too_many_attempts()
+        if not request.form.get("accept_terms"):
+            flash("Please accept the Terms of Use and Privacy Policy to create an account.", "error")
+            return render_template("auth.html", mode="register", csrf=auth.csrf_token())
         user, error = auth.register_user(request.form.get("name", ""),
                                          request.form.get("email", ""),
                                          request.form.get("password", ""))
@@ -209,6 +277,8 @@ def login():
         return redirect(url_for("index"))
     if request.method == "POST":
         auth.verify_csrf()
+        if not AUTH_LIMIT.allow("login:" + _client_ip()):
+            return _too_many_attempts()
         user = auth.authenticate(request.form.get("email", ""), request.form.get("password", ""))
         if not user:
             flash("Email address or password was not recognised.", "error")
@@ -454,6 +524,24 @@ def api_opportunity(opp_id):
     item["matched_terms"] = json.loads(item.pop("user_terms") or "[]")
     item["breakdown"] = json.loads(item.pop("user_breakdown") or "{}")
     return jsonify(item)
+
+
+@app.route("/api/jobs/manual", methods=["POST"])
+@auth.login_required
+def api_add_manual_job():
+    """Add a job found on any website. Private to the signed-in user."""
+    auth.verify_csrf()
+    data = request.get_json(silent=True) or {}
+    track = data.get("track", "academic")
+    if not profiles.get_profile(g.user["id"], track):
+        return jsonify({"error": f"Upload your {track} CV first so the job can be matched."}), 400
+    try:
+        job = manual_jobs.add_job(g.user["id"], track, data)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    matching.rebuild_matches(g.user["id"], track)
+    matching.set_user_status(g.user["id"], job["id"], track, "saved")
+    return jsonify({"ok": True, "job": job})
 
 
 @app.route("/api/status", methods=["POST"])

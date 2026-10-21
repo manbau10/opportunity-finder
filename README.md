@@ -136,6 +136,17 @@ For adverts whose listing page shows no closing date, the app opens the advert i
 read the deadline, location and full text, then re-scores. Adverts already read are never
 re-opened, so each day's refresh is faster than the first.
 
+**Any other website.** Use **Add a job** on the jobs page: paste the link of any advert
+(HigherEdJobs, LinkedIn, a university page ...). If the site allows it the page is read;
+if not, paste the advert text. The job is private to you, matched to your CV, and can have
+an application workspace like any other.
+
+**Licensed APIs (set by whoever runs the server).** `ADZUNA_APP_ID` + `ADZUNA_APP_KEY`,
+`JOOBLE_API_KEY`, `USAJOBS_API_KEY` + `USAJOBS_EMAIL`, `REED_API_KEY`. Each switches its
+source on and appears on the Job sources page. These were written to the providers'
+documentation and are covered by offline tests; they have not been run against the live
+services because no keys were available.
+
 ### Checking that the sources still work
 
 Job boards change their pages from time to time. This prints one line per board, OK,
@@ -151,9 +162,9 @@ A board that fails is one small file under `finder/sources/` or in
 ### Honest limitations
 
 - **Boards that block automated access are not used.** HigherEdJobs, Academic Positions,
-  Indeed, Seek, Bayt, Jooble and similar sites sit behind bot protection, and the app does
-  not try to defeat it. Where a country has no open board, add an Adzuna key or a search
-  key.
+  Indeed, LinkedIn, Seek, Bayt and similar sites sit behind bot protection, and the app does
+  not try to defeat it (nor should a commercial product: it would break their terms). Use
+  **Add a job** for single adverts, a licensed API key for coverage, or a partner feed.
 - **Named fellowships are not on job boards.** `finder/sources/fellowships.py` holds a
   curated register with the official link for each scheme. Entries deliberately show no
   deadline: rounds move every year, and a confidently wrong date is worse than none.

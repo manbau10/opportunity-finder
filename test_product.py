@@ -87,7 +87,8 @@ class ProductFlowTest(unittest.TestCase):
         with client.session_transaction() as session:
             csrf = session["csrf"]
         response = client.post("/register", data={"name": "Product Test User", "email": email,
-                               "password": "A-long-test-password-42", "csrf_token": csrf})
+                               "password": "A-long-test-password-42", "csrf_token": csrf,
+                               "accept_terms": "1"})
         self.assertEqual(response.status_code, 302)
         with client.session_transaction() as session:
             return client, session["csrf"], session["user_id"]

@@ -488,6 +488,112 @@ def fetch_adzuna(titles: list[str], log=print) -> list[dict]:
     return list(out.values())
 
 
+def _post_json(url: str, payload: dict, headers: dict | None = None) -> dict | None:
+    import requests
+    try:
+        r = requests.post(url, json=payload, headers=headers or {}, timeout=25)
+        return r.json() if r.status_code == 200 else None
+    except (requests.RequestException, ValueError):
+        return None
+
+
+JOOBLE_MARKETS = ["United Kingdom", "United States", "Canada", "Australia", "Ireland", "Germany",
+                  "France", "Netherlands", "South Africa", "Nigeria", "Singapore", "United Arab Emirates"]
+
+
+def jooble_enabled() -> bool:
+    return bool(os.environ.get("JOOBLE_API_KEY"))
+
+
+def fetch_jooble(titles: list[str], log=print) -> list[dict]:
+    """Jooble (about 70 countries). Key: https://jooble.org/api/about"""
+    key = os.environ["JOOBLE_API_KEY"]
+    out: dict[str, dict] = {}
+    for place in JOOBLE_MARKETS:
+        for title in titles[:3]:
+            data = _post_json(f"https://jooble.org/api/{key}", {"keywords": title, "location": place})
+            for row in (data or {}).get("jobs", []):
+                if not row.get("link"):
+                    continue
+                item = make_item("Jooble", "jooble", row.get("title", ""), row.get("company", ""),
+                                 row.get("location") or place, row["link"], row.get("snippet", ""),
+                                 _iso(row.get("updated")), title, country="" )
+                out[item["id"]] = item
+    log("  Jooble: %d postings" % len(out))
+    return list(out.values())
+
+
+def usajobs_enabled() -> bool:
+    return bool(os.environ.get("USAJOBS_API_KEY") and os.environ.get("USAJOBS_EMAIL"))
+
+
+def fetch_usajobs(titles: list[str], log=print) -> list[dict]:
+    """USAJOBS, the US federal government. Key: https://developer.usajobs.gov/"""
+    headers = {"User-Agent": os.environ["USAJOBS_EMAIL"], "Authorization-Key": os.environ["USAJOBS_API_KEY"],
+               "Host": "data.usajobs.gov"}
+    out: dict[str, dict] = {}
+    for title in titles[:6]:
+        data = get_json("https://data.usajobs.gov/api/search?"
+                        + urllib.parse.urlencode({"Keyword": title, "ResultsPerPage": 50}), headers=headers)
+        rows = ((data or {}).get("SearchResult") or {}).get("SearchResultItems", [])
+        for row in rows:
+            d = row.get("MatchedObjectDescriptor") or {}
+            url = d.get("PositionURI")
+            if not url:
+                continue
+            summary = (((d.get("UserArea") or {}).get("Details")) or {}).get("JobSummary", "")
+            item = make_item("USAJOBS", "us_usajobs", d.get("PositionTitle", ""), d.get("OrganizationName", ""),
+                             d.get("PositionLocationDisplay", ""), url, summary or d.get("QualificationSummary", ""),
+                             _iso(d.get("PublicationStartDate")), title, _iso(d.get("ApplicationCloseDate")),
+                             country="United States")
+            out[item["id"]] = item
+    log("  USAJOBS: %d postings" % len(out))
+    return list(out.values())
+
+
+def reed_api_enabled() -> bool:
+    return bool(os.environ.get("REED_API_KEY"))
+
+
+def fetch_reed_api(titles: list[str], log=print) -> list[dict]:
+    """Reed's official API (full descriptions). Key: https://www.reed.co.uk/developers"""
+    import requests
+    out: dict[str, dict] = {}
+    for title in titles[:6]:
+        try:
+            r = requests.get("https://www.reed.co.uk/api/1.0/search",
+                             params={"keywords": title, "resultsToTake": 100},
+                             auth=(os.environ["REED_API_KEY"], ""), timeout=25)
+            rows = r.json().get("results", []) if r.status_code == 200 else []
+        except (requests.RequestException, ValueError):
+            rows = []
+        for row in rows:
+            url = row.get("jobUrl")
+            if not url:
+                continue
+            item = make_item("Reed (UK, API)", "uk_reed_api", row.get("jobTitle", ""), row.get("employerName", ""),
+                             row.get("locationName", ""), url, row.get("jobDescription", ""),
+                             _iso(row.get("date")), title, _iso(row.get("expirationDate")),
+                             country="United Kingdom")
+            out[item["id"]] = item
+    log("  Reed API: %d postings" % len(out))
+    return list(out.values())
+
+
+def keyed_sources() -> list[tuple[str, object]]:
+    """Licensed sources that switch on when the operator sets their keys."""
+    chosen = []
+    if adzuna_enabled():
+        chosen.append(("adzuna", fetch_adzuna))
+    if jooble_enabled():
+        chosen.append(("jooble", fetch_jooble))
+    if usajobs_enabled():
+        chosen.append(("us_usajobs", fetch_usajobs))
+    if reed_api_enabled():
+        chosen.append(("uk_reed_api", fetch_reed_api))
+    return chosen
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------

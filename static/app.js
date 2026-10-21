@@ -429,6 +429,30 @@ function updateFilterHint() {
   $('#filtersHint').textContent = active.length ? active.join(' · ') : 'none applied';
 }
 
+/* ------------------------------------------------------------------ add a job */
+$('#addJobBtn').addEventListener('click', () => { $('#addJob').hidden = false; });
+$('#addJobClose').addEventListener('click', () => { $('#addJob').hidden = true; });
+$('#addJobForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const status = $('#addJobStatus');
+  status.textContent = 'Reading the advert and matching it to your CV…'; status.className = 'form-status';
+  const body = Object.fromEntries(new FormData(e.target));
+  body.track = appConfig.track;
+  const res = await fetch('/api/jobs/manual', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': appConfig.csrf },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok) { status.textContent = data.error || 'Could not add the job.'; status.className = 'form-status error'; return; }
+  status.textContent = 'Added and saved to your list.'; status.className = 'form-status success';
+  e.target.reset();
+  state.status = 'saved'; state.deadline = 'any'; state.min_score = 0;
+  $$('#statusSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === 'saved'));
+  $$('#deadlineSeg button').forEach(b => b.classList.toggle('on', b.dataset.v === 'any'));
+  $('#minScore').value = 0; $('#minScoreVal').textContent = '0';
+  setTimeout(() => { $('#addJob').hidden = true; load(); }, 700);
+});
+
 /* ------------------------------------------------------------------ start */
 load();
 pollRefresh();

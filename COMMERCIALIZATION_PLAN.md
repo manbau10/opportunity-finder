@@ -80,3 +80,27 @@ separate saved/applied lists, configure an AI and search provider, generate a
 staged application workspace with individual Word and PDF downloads, and cannot
 read each other's profiles, keys or workspaces. The live deployment must preserve
 these records across redeployments.
+
+## Status of commercial readiness
+
+Done: accounts, private per-CV matching, bring-your-own AI and search keys, staged
+application workspaces, terms and privacy pages (templates), account data export and
+permanent deletion, login and sign-up rate limiting, security headers, private
+"add a job from any website", and licensed-API sources that switch on with keys
+(Adzuna, Jooble, USAJOBS, Reed API).
+
+Still required before charging customers:
+
+1. **Source licensing.** Boards that refuse automated readers (HigherEdJobs, Indeed,
+   LinkedIn, Seek, Bayt and others) are deliberately not scraped. The commercial route
+   is each board's licensed feed or partner API (HigherEdJobs and Indeed offer partner
+   programmes; Adzuna, Jooble, Reed and USAJOBS publish APIs). The free feeds used today
+   (RSS, public JSON, public search pages) should each have their terms checked for
+   commercial use, and attribution kept (the app always links to the original advert).
+2. **Legal review** of the Terms and Privacy templates for the operator's jurisdiction
+   (GDPR/UK GDPR if there are EU/UK users). Set OPERATOR_NAME and CONTACT_EMAIL.
+3. **Email verification and password reset** (needs a mail provider).
+4. **Billing and quotas** (for example Stripe) and an admin console.
+5. **A durable job queue** for refreshes and document generation, instead of threads.
+6. **Hosting capacity.** The free tiers (Render, Neon) are for a pilot: Neon limits monthly
+   data transfer, and shared job data plus per-user matching grows with every account.

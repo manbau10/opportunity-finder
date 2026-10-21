@@ -412,8 +412,9 @@ def _generate(pack_id: str, user_id: str, opportunity_id: str, kind: str,
               requested: list[str]) -> None:
     conn = store.connect()
     try:
-        row = conn.execute("SELECT * FROM opportunities WHERE id=? AND career_track=?",
-                           (opportunity_id, kind)).fetchone()
+        row = conn.execute("SELECT * FROM opportunities WHERE id=? AND career_track=? "
+                           "AND (owner_user_id IS NULL OR owner_user_id=?)",
+                           (opportunity_id, kind, user_id)).fetchone()
     finally:
         conn.close()
     if not row:

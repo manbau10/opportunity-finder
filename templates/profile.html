@@ -39,6 +39,17 @@
     </section>
   {% endfor %}
   </div>
+  <section class="settings-card" style="margin-top:24px">
+    <h2>Your account and data</h2>
+    <p class="tiny">Download everything we hold about you, or delete your account and all of it permanently
+      (CVs, matches, saved jobs, workspaces, API keys). Deletion cannot be undone.</p>
+    <p><a class="btn" href="/api/account/export">Download my data</a></p>
+    <form id="deleteForm" class="stack-form" style="max-width:360px">
+      <label>Confirm with your password<input type="password" name="password" autocomplete="current-password" required></label>
+      <button class="btn danger-text" type="submit">Delete my account</button>
+      <span class="form-status" id="deleteStatus" aria-live="polite"></span>
+    </form>
+  </section>
 </main>
 <script>window.APP={{ {'csrf': csrf} | tojson }};</script>
 <script>
@@ -60,5 +71,13 @@ document.querySelectorAll('.preference-form').forEach(form => form.addEventListe
   status.textContent=response.ok?`Saved — ${data.matched} opportunities rescored`:(data.error||'Could not save');
   status.className='form-status '+(response.ok?'success':'error');
 }));
+document.querySelector('#deleteForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  if(!confirm('Permanently delete your account and all your data?')) return;
+  const status=document.querySelector('#deleteStatus');
+  const r=await fetch('/api/account/delete',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':APP.csrf},body:JSON.stringify({password:e.target.password.value})});
+  const d=await r.json();
+  if(r.ok){location.href='/login';}else{status.textContent=d.error||'Could not delete';status.className='form-status error';}
+});
 </script>
 </body></html>

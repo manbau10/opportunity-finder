@@ -17,7 +17,8 @@ FIELDS = ["id", "source", "source_key", "title", "org", "department", "location"
           "first_seen", "last_seen", "status"]
 
 # Columns added after the first release; created on connect if missing.
-LATER_COLUMNS = (("positives", "TEXT"), ("career_track", "TEXT DEFAULT 'academic'"))
+LATER_COLUMNS = (("positives", "TEXT"), ("career_track", "TEXT DEFAULT 'academic'"),
+                 ("owner_user_id", "TEXT"))
 PACK_LATER_COLUMNS = (
     ("progress", "INTEGER DEFAULT 0"),
     ("current_step", "TEXT DEFAULT 'research'"),

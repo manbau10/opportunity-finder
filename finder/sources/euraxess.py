@@ -92,12 +92,12 @@ def fetch(log=print) -> list[dict]:
     pages = list(range(LIMITS["euraxess_pages"]))
 
     def one(page: int):
-        r = get(LIST.format(page=page))
+        r = get(LIST.format(page=page), retries=2, delay=0.8)
         return (page, parse(r.text, terms)) if r is not None else (page, None)
 
     out: dict[str, dict] = {}
     seen = failed = 0
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         for page, result in pool.map(one, pages):
             if result is None:
                 failed += 1
