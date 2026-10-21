@@ -434,8 +434,8 @@ class ProviderModelsTest(unittest.TestCase):
         from finder import providers
         msg = "404 for url: https://x/v1beta/models/m:generateContent?key=AQ.secretvalue123&alt=1"
         self.assertNotIn("secretvalue", providers.scrub(msg, "AQ.secretvalue123"))
-        self.assertIn("aistudio.google.com", providers.key_hint("gemini", "AQ.abc"))
-        self.assertEqual(providers.key_hint("gemini", "AIzaabc"), "")
+        self.assertEqual(providers.key_hint("gemini", "AQ.abc"), "")      # new-style keys are valid
+        self.assertIn("OpenAI", providers.key_hint("gemini", "sk-abc"))
 
     def test_gemini_models_are_listed_for_the_dropdown(self):
         from finder import providers

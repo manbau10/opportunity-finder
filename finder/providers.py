@@ -217,9 +217,6 @@ def scrub(message: str, *secrets_: str) -> str:
 
 def key_hint(provider: str, key: str) -> str:
     """A plain-language hint when a key looks like it belongs to a different service."""
-    if provider == "gemini" and key.startswith("AQ."):
-        return ("This key looks like a Google Cloud (Vertex AI) key. Free Gemini keys come from "
-                "https://aistudio.google.com/apikey and start with AIza.")
     if provider == "openai" and key.startswith("AIza"):
         return "This is a Google key. Choose Google Gemini as the provider."
     if provider == "gemini" and key.startswith("sk-"):

@@ -707,8 +707,11 @@ def api_test_provider():
         cfg = providers.get_config(g.user["id"], include_keys=True) or {}
         key = cfg.get("ai_key", "")
         hint = providers.key_hint(cfg.get("ai_provider", ""), key)
-        return jsonify({"error": (hint + " " if hint else "") +
-                        providers.scrub(f"{type(exc).__name__}: {exc}", key, cfg.get("search_key", ""))}), 400
+        text = providers.scrub(f"{type(exc).__name__}: {exc}", key, cfg.get("search_key", ""))
+        if "404" in text and not hint:
+            hint = ("The provider does not know that model name for your key. Press "
+                    "'Load available models' and choose one from the list.")
+        return jsonify({"error": (hint + " " if hint else "") + text}), 400
 
 
 @app.route("/api/packs", methods=["POST"])
